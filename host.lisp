@@ -19,6 +19,7 @@
 (make-uint 4 8000)
  ; => (64 31 0 0)
 
+(disassemble 'u2b)
 (defun u2b (type)
   (case type
      (:u8 1)
@@ -733,16 +734,35 @@
                        (getf :next-state state-data))
                      state))
 
-      (:pre-reset (make-state :reset-ok (hci-reset hci)))
-      (:reset-ok (make-state :read-bufsize-ok (hci-read-buffer-size hci)))
-      (:read-bufsize-ok (make-state :set-event-mask-ok (hci-allow-all-the-events hci)))
-      (:set-random-address-ok (make-state :set-adv-param-ok (hci-set-random-address #xC1234567890A hci)))
-      (:set-adv-param-ok (make-state :set-adv-data-ok (hci-set-adv-data (list
-                                                                         (make-ad :flags '(#x01)) ; LE General discoverable
-                                                                         (make-ad-name "🔵-🦷"))
-                                                                        hci)))
-      (:set-adv-data-ok (make-state :adv-enable-ok (hci-set-adv-enable t hci)))
-      (:adv-enable-ok (make-state :adv-disable-ok (hci-set-adv-enable nil hci)))
+      (:pre-reset
+       (make-state :reset-ok (hci-reset hci)))
+      ;; send cmd.
+      ;; closure:
+      ;; - process rsp
+      ;; - send next cmd, set next closure
+      (hci-read-buffer-size hci)
+      (#'hci-read-buffer-size-process
+       (lambda (hci) (set-adv-enable t hci)))
+
+      (:reset-ok
+       (make-state :read-bufsize-ok (hci-read-buffer-size hci)))
+
+      (:read-bufsize-ok
+       (make-state :set-event-mask-ok (hci-allow-all-the-events hci)))
+
+      (:set-random-address-ok
+       (make-state :set-adv-param-ok (hci-set-random-address #xC1234567890A hci)))
+
+      (:set-adv-param-ok
+       (make-state :set-adv-data-ok (hci-set-adv-data (list
+                                                       (make-ad :flags '(#x01)) ; LE General discoverable
+                                                       (make-ad-name "🔵-🦷"))
+                                                      hci)))
+      (:set-adv-data-ok
+       (make-state :adv-enable-ok (hci-set-adv-enable t hci)))
+
+      (:adv-enable-ok
+       (make-state :adv-disable-ok (hci-set-adv-enable nil hci)))
 
       ;; TODO: add idle state
       )))
