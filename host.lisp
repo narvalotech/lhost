@@ -47,13 +47,19 @@
 (type->octets :bt-addr)
  ; => 6 (3 bits, #x6, #o6, #b110)
 
-(defun make-c-int (type value)
-  (make-uint (type->octets type) value))
+(defun make-c-int (type value &key (be))
+  (let ((res (make-uint (type->octets type) value)))
+    (if be
+        (reverse res)
+        res)))
 
 (make-c-int :u8 #xFF)
  ; => (255)
-(make-c-int :u32 8000)
- ; => (64 31 0 0)
+(make-c-int :u32 #x12340000)
+ ; => (0 0 52 18)
+
+(make-c-int :u32 #x12340000 :be t)
+ ; => (18 52 0 0)
 
 (defun decode-c-int (bytes)
   (let ((result 0))
@@ -76,66 +82,6 @@
 ;; Eg. write default data length cmd. Len = 200 bytes, time = 1000 us
 (make-c-struct '(("tx-octets" :u16 200) ("tx-time-us" :u16 1000)))
  ; => (200 0 232 3)
-
-;;;;;;;;;;;;; babblesim PHY
-
-(defconstant PB_MSG_WAIT #x01)
-(defconstant PB_MSG_WAIT_END #x81)
-(defconstant PB_MSG_TERMINATE #xFFFE)
-(defconstant PB_MSG_DISCONNECT #xFFFF)
-
-(defun make-wait-cmd (us)
-  (append
-   (make-uint 4 PB_MSG_WAIT)
-   (make-uint 8 us)))
-
-(make-wait-cmd 10)
-
-(defun make-terminate-cmd ()
-  (make-uint 4 PB_MSG_TERMINATE))
-
-(defun read-bytes (bytes stream)
-  (let ((b
-          (if (equal bytes 1)
-              (list (read-byte stream))
-              (loop for byte from 0 to (- bytes 1) collect
-                                                   (read-byte stream)))))
-    ;; (format t "read-bytes: ~A~%" b)
-    b))
-
-(defun make-simplex-raw-fd-stream (file is-output)
-  (sb-sys:make-fd-stream (sb-posix:file-descriptor file)
-                         :element-type 'unsigned-byte
-                         :input (not is-output)
-                         :output is-output
-                         :buffering :none))
-
-(defun open-simplex-fd (path is-output)
-  (let ((file (if is-output
-                 (open path :direction :output :if-exists :overwrite)
-                 (open path :direction :input))))
-    (make-simplex-raw-fd-stream file is-output)))
-
-(defun sim-wait (ms sim)
-  (let ((rx (getf sim :rx))
-        (tx (getf sim :tx))
-        (time (getf sim :time)))
-    (setf time (+ time (* ms 1000)))
-    (format t "waiting until ~A us (delta ~A ms).." (getf sim :time) ms)
-
-    (write-sequence (make-wait-cmd time) tx)
-    (setf (getf sim :time) time)
-
-    (read-bytes 4 rx)
-    (format t "done~%")))
-
-(defun sim-terminate (sim)
-  (format t "term~%")
-  (write-sequence (make-terminate-cmd) (getf sim :tx)))
-
-(mapcan #'(lambda (x) x) '(36 32 1 (200 0 232 3)))
-(append '(36 32) '(1) '(200 0 232 3))
-(make-uint 2 #x0022)
 
 ;;;;;;;;;;;;; HCI packet-building
 
@@ -458,41 +404,12 @@
 
 ;;;;;;;;;;;;; script
 
-;; Run the REPL
-(defparameter *bs-rx-path* "/tmp/bs_jon/myid/2G4.d0.ptd")
-(defparameter *bs-tx-path* "/tmp/bs_jon/myid/2G4.d0.dtp")
-(defparameter *h2c-path*   "/tmp/repl/myid/uart.h2c")
-(defparameter *c2h-path*   "/tmp/repl/myid/uart.c2h")
-
 (defparameter sizes '(:acl-tx-size 0
                       :acl-rx-size 1))
 
 (defmacro with-gensyms ((&rest names) &body body)
   `(let ,(loop for n in names collect `(,n (gensym)))
      ,@body))
-
-(defmacro with-bsim (instance rx-path tx-path &body body)
-  (with-gensyms (rx tx)
-    `(with-open-stream (,rx (open-simplex-fd ,rx-path nil))
-       (with-open-stream (,tx (open-simplex-fd ,tx-path t))
-         (let ((,instance (list :rx ,rx :tx ,tx :time 0)))
-           (progn ,@body)
-           )))))
-
-(defmacro with-hci (instance h2c-path c2h-path &body body)
-  (with-gensyms (h2c c2h)
-    `(with-open-stream (,h2c (open-simplex-fd ,h2c-path t))
-       (with-open-stream (,c2h (open-simplex-fd ,c2h-path nil))
-         (let ((,instance (make-hci-dev ,h2c ,c2h)))
-           (progn ,@body)
-           )))))
-
-;; (with-bsim sim *bs-rx-path* *bs-tx-path*
-;;   (format t "connected to PHY (rx ~A tx ~A)~%"
-;;           (sb-posix:file-descriptor (getf sim :rx))
-;;           (sb-posix:file-descriptor (getf sim :tx)))
-;;   (sim-wait 1000 sim)
-;;   (sim-terminate sim))
 
 (defun hci-send-cmd (cmd hci)
   "Send a command and check it's return status. Return params if no error."
@@ -583,9 +500,9 @@
         :class-uuid-128-incomplete #x06
         :class-uuid-128-complete #x07
 
-        :sollicitation-uuid-16 #x14
-        :sollicitation-uuid-32 #x1f
-        :sollicitation-uuid-128 #x15
+        :solicitation-uuid-16 #x14
+        :solicitation-uuid-32 #x1f
+        :solicitation-uuid-128 #x15
 
         :data-uuid-16 #x16
         :data-uuid-32 #x20
@@ -708,23 +625,64 @@
 (make-ad-name "🎉")
  ; => (5 9 240 159 142 137)
 
-(with-hci hci *h2c-path* *c2h-path*
-  (format t "================ enter ===============~%")
-  (hci-reset hci)
-  (hci-read-buffer-size hci)
-  (hci-allow-all-the-events hci)
-  (hci-set-random-address #xC1234567890A hci)
+(defun px (l)
+  (format nil "~{~2,'0X~^ ~}" l))
 
-  ;; Advertise for a short minute
-  (hci-set-adv-param hci)
-  (hci-set-adv-data (list
-                     (make-ad :flags '(#x01)) ; LE General discoverable
-                     (make-ad-name "🔵-🦷"))
-                    hci)
-  (hci-set-adv-enable t hci)
-  (sleep .1)
-  (hci-set-adv-enable nil hci)
+(make-ad :flags '(#x00))
+ ; => (2 1 0) ; limited discoverable mode
+ ; => (2 1 1) ; general discoverable mode
 
-  (format t "HCI: ~X~%" hci)
-  (format t "================ exit ===============~%")
-  )
+;; Two octets LE value
+(px (make-ad :appearance (make-c-int :u16 #x80)))
+ ; => "03 19 80 00"
+
+(px (make-ad :manufacturer-specific
+             (append
+              (make-c-int :u16 #x0087)  ; Garmin ID
+              '(#x13 #x37))))
+ ; => "05 FF 87 00 13 37"
+
+(defun rmx (uuidstr)
+  (let ((idx (search "xxxx" uuidstr :test #'equalp)))
+    (if idx
+        (replace uuidstr "0000" :start1 idx :end1 (+ idx 4))
+        uuidstr)))
+
+(defun parse-uuid-128 (uuidstr)
+  (let ((uuidstr (remove #\- (rmx uuidstr))))
+    (loop for i from 0 below (length uuidstr) by 2
+          for two-chars = (subseq uuidstr i (min (+ i 2) (length uuidstr)))
+          when two-chars
+            collect (parse-integer two-chars :radix 16))))
+
+(defun parse-uuid (uuidstr)
+  (if (= 2 (length uuidstr))
+      (make-c-int :u16 (parse-integer uuidstr :radix 16))
+      (reverse (parse-uuid-128 uuidstr))))
+
+(defconstant +nus-uuid+ "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+(defconstant +battery-uuid+ "180F")
+
+(px (parse-uuid +nus-uuid+))
+ ; => "9E CA DC 24 0E E5 A9 E0 93 F3 A3 B5 01 00 40 6E"
+
+(px (parse-uuid +battery-uuid+))
+ ; => "0F 18"
+
+(defun make-ad-solicited-uuid (uuid-strings)
+  "List of UUID strings to be solicited. 16b and 128b are supported."
+  (let ((uuids (mapcar #'parse-uuid uuid-strings)))
+    (make-ad :solicitation-uuid-128 (apply #'nconc uuids))))
+
+(px (make-ad-solicited-uuid
+ (list +nus-uuid+
+       +battery-uuid+)))
+ ; => "13 15 9E CA DC 24 0E E5 A9 E0 93 F3 A3 B5 01 00 40 6E 0F 18"
+
+(defun make-ad-mfg (manufacturer-id payload)
+  (make-ad :manufacturer-specific
+           (append (make-c-int :u16 manufacturer-id) payload)))
+
+(px (to-c-string "GRR!"))
+ ; => "47 52 52 21"
+
