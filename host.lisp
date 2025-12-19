@@ -133,10 +133,6 @@
   (format t "term~%")
   (write-sequence (make-terminate-cmd) (getf sim :tx)))
 
-(mapcan #'(lambda (x) x) '(36 32 1 (200 0 232 3)))
-(append '(36 32) '(1) '(200 0 232 3))
-(make-uint 2 #x0022)
-
 ;;;;;;;;;;;;; HCI packet-building
 
 (defconstant +h4-types+
