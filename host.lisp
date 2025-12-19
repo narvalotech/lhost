@@ -457,8 +457,8 @@
 ;; Run the REPL
 (defparameter *bs-rx-path* "/tmp/bs_jon/myid/2G4.d0.ptd")
 (defparameter *bs-tx-path* "/tmp/bs_jon/myid/2G4.d0.dtp")
-(defparameter *h2c-path*   "/tmp/repl/myid/uart.h2c")
-(defparameter *c2h-path*   "/tmp/repl/myid/uart.c2h")
+(defparameter *h2c-path*   "/tmp/py/uart.h2c")
+(defparameter *c2h-path*   "/tmp/py/uart.c2h")
 
 (defparameter sizes '(:acl-tx-size 0
                       :acl-rx-size 1))
