@@ -380,10 +380,17 @@
               :handle (pull-int payload :u16)
               :reason (pull-int payload :u8))))
 
+(defun evt-num-completed-packets (payload)
+  (list :number-of-completed-packets
+        (list :num-handles (pull-int payload :u8)
+              ;; TODO: decode later
+              :payload payload)))
+
 (defparameter *hci-events*
   '(#x05 evt-disc-complete
     #x0e evt-cmd-complete
     #x0f evt-cmd-status
+    #x13 evt-num-completed-packets
     #x3e evt-le-meta))
 
 (getf *hci-events* #x0e)
@@ -549,6 +556,8 @@
 
       (case opcode
         (:evt (decode-hci-event header payload))
+        (:acl (progn (format t "[ACL] ~A~%" payload)
+                     payload))
         (t (error "doesn't look like anything to me"))))))
 
 (defun receive-cmd (hci)
@@ -894,6 +903,76 @@
     (when (eql (car evt) :disconnection-complete)
       (getf (nth 1 evt) :handle))))
 
+;; Mandatory:
+;; - error-rsp
+;; - find-information-req
+;; - read-req
+(defconstant +att-opcodes+
+    (list :error-rsp #x01
+          :exchange-mtu-req #x02
+          :exchange-mtu-rsp #x03
+          :find-information-req #x04
+          :find-information-rsp #x05
+          :find-by-type-value-req #x06
+          :find-by-type-value-rsp #x07
+          :read-by-type-req #x08
+          :read-by-type-rsp #x09
+          :read-req #x0A
+          :read-rsp #x0B
+          :read-blob-req #x0C
+          :read-blob-rsp #x0D
+          :read-multiple-req #x0E
+          :read-multiple-rsp #x0F
+          :read-by-group-type-req #x10
+          :read-by-group-type-rsp #x11
+          :write-req #x12
+          :write-rsp #x13
+          :write-cmd #x52
+          :prepare-write-req #x16
+          :prepare-write-rsp #x17
+          :execute-write-req #x18
+          :execute-write-rsp #x19
+          :read-multiple-variable-req #x20
+          :read-multiple-variable-rsp #x21
+          :multiple-handle-value-ntf #x23
+          :handle-value-ntf #x1B
+          :handle-value-ind #x1D
+          :handle-value-cfm #x1E
+          :signed-write-cmd #xD2))
+
+(defun att-make-opcode (op-name)
+  (make-c-int :u8 (getf +att-opcodes+ op-name)))
+
+(defun att-make-packet (op param)
+  ;; TODO: check param is MTU-1
+  (append (att-make-opcode op) param))
+
+(defconstant +l2cap-att-chan+ #x0004)
+
+(defun att-set-mtu (hci conn-handle mtu)
+  (l2cap-send
+   hci
+   conn-handle
+   +l2cap-att-chan+
+   (att-make-packet :exchange-mtu-req
+                    (make-c-int :u16 mtu))))
+
+(defun l2cap-send (hci conn-handle channel packet)
+  (hci-send-acl
+   hci
+   conn-handle
+   (append
+    (make-c-int :u16 (length packet))
+    (make-c-int :u16 channel)
+    packet)))
+
+(defun hci-send-acl (hci conn-handle packet)
+  (send :acl
+        (append
+         (make-c-int :u16 conn-handle)
+         (make-c-int :u16 (length packet))
+         packet) hci))
+
 (with-hci hci *h2c-path* *c2h-path*
   (format t "================ enter ===============~%")
   (hci-reset hci)
@@ -918,6 +997,17 @@
 
     ;; Wait for the connection event
     (setf handle (wait-for-conn hci))
+
+    ;; Pop channel selection evt
+    (format t "RX ~A~%" (receive hci))
+
+    ;; Upgrade MTU
+    (format t "Upgrading MTU..~%")
+    (att-set-mtu hci handle 255)
+    ;; ncp
+    (format t "RX ~A~%" (receive hci))
+    ;; att response
+    (format t "RX ~A~%" (receive hci))
 
     ;; Wait a bit
     (sleep 2)
