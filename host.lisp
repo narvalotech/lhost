@@ -979,6 +979,22 @@
    (att-make-packet :exchange-mtu-req
                     (make-c-int :u16 mtu))))
 
+;; Async design:
+;;
+;; send cmd: send immediately
+;; -> how to wait for response?
+;; -> start HCI-RAW-RX with filter
+;; -> when filter doesn't match, push RX packet to HCI-RX queue
+;; -> when filter matches, return
+;;
+;; send data: send immediately
+;; -> same pattern
+;; -> be wary of data re-ordering
+;;
+;; idle loop:
+;; -> pull from HCI-RX, dispatch events/data
+;; -> pull from HCI-RAW-RX, dispatch directly
+
 (with-hci hci *h2c-path* *c2h-path*
   (format t "================ enter ===============~%")
   (hci-reset hci)
