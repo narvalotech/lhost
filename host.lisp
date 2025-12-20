@@ -202,6 +202,26 @@
              :filter-duplicates :u8)
      (:status :u8))
 
+    :create-connection
+    (#x200D (:scan-interval :u16
+             :scan-window :u16
+             :filter-policy :u8
+             :peer-address-type :u8
+             :peer-address (list :u8)
+             :own-address-type :u8
+             :interval-min :u16
+             :interval-max :u16
+             :max-latency :u16
+             :supervision-timeout :u16
+             :min-connection-event-length :u16
+             :max-connection-event-length :u16)
+     nil)
+
+    :disconnect
+    (#x0406 (:handle :u16
+             :reason :u8)
+     nil)
+
     :read-buffer-size
     (#x2002
      nil
@@ -303,22 +323,66 @@
                     :data-length data-length
                     :data data
                     :rssi rssi)))))
-    (list :num-reports num-reports
-          :reports reports)))
+    (list :le-scan-report
+          (list :num-reports num-reports
+                :reports reports))))
+
+(defun decode-conn-complete (payload)
+  (list
+   :le-conn-complete
+   (list
+    :status (pull-int payload :u8)
+    :handle (pull-int payload :u16)
+    :role (pull-int payload :u8)
+    :peer-address-type (pull-int payload :u8)
+    :peer-address (pull payload 6)
+    :interval (pull-int payload :u16)
+    :latency (pull-int payload :u16)
+    :timeout (pull-int payload :u16)
+    :clock-accuracy (pull-int payload :u8))))
+
+(defun decode-enh-conn-complete (payload)
+  (list
+   :le-enh-conn-complete
+   (list
+    :status (pull-int payload :u8)
+    :handle (pull-int payload :u16)
+    :role (pull-int payload :u8)
+    :peer-address-type (pull-int payload :u8)
+    :peer-address (pull payload 6)
+    :local-rpa (pull payload 6)
+    :peer-rpa (pull payload 6)
+    :interval (pull-int payload :u16)
+    :latency (pull-int payload :u16)
+    :timeout (pull-int payload :u16)
+    :clock-accuracy (pull-int payload :u8))))
+
+(defun decode-channel-selection-algo (payload)
+  (list :le-channel-selection-algo
+        :handle (pull-int payload :u16)
+        :algo (pull-int payload :u8)))
 
 (defun decode-le-meta (payload)
   (let ((sub (pull-int payload :u8)))
     (case sub
       (#x02 (decode-adv-report payload))
-      (otherwise (list :unknown payload)))))
+      (#x01 (decode-conn-complete payload))
+      (#x0A (decode-enh-conn-complete payload))
+      (#x14 (decode-channel-selection-algo payload))
+      (otherwise (list :le-unknown :sub sub :raw payload)))))
 
 (defun evt-le-meta (payload)
-  (list
-   :le-meta
-   (decode-le-meta payload)))
+  (decode-le-meta payload))
+
+(defun evt-disc-complete (payload)
+  (list :disconnection-complete
+        (list :status (pull-int payload :u8)
+              :handle (pull-int payload :u16)
+              :reason (pull-int payload :u8))))
 
 (defparameter *hci-events*
-  '(#x0e evt-cmd-complete
+  '(#x05 evt-disc-complete
+    #x0e evt-cmd-complete
     #x0f evt-cmd-status
     #x3e evt-le-meta))
 
@@ -546,7 +610,7 @@
 ;;   (sim-terminate sim))
 
 (defun hci-send-cmd (cmd hci)
-  "Send a command and check it's return status. Return params if no error."
+  "Send a command and check it's return status. Return status/params if no error."
 
   (send :cmd cmd hci)
   (let ((response (receive-cmd hci)))
@@ -554,18 +618,26 @@
     ;; (CMD-COMPLETE (NCMD 1 OPCODE C03 PARAMS (STATUS 0)))
     (format t "RX: ~x~%" response)
 
-    (let* ((data (nth 1 response))
-           (params (getf data :params))
-           (status (getf params :status)))
-
-      (if (not (equal status 0))
-          (progn
+    (if (eql (car response) :cmd-status)
+        (let* ((status (getf (nth 1 response) :status)))
+          (unless (zerop status)
             (format t "cmd failed: status 0x~x~%" status)
-            (break)))
+            (break))
+          status)
 
-      (if (equal status 0)
-          params
-          nil))))
+        ;; cmd-complete
+        (let* ((data (nth 1 response))
+               (params (getf data :params))
+               (status (getf params :status)))
+
+          (if (not (equal status 0))
+              (progn
+                (format t "cmd failed: status 0x~x~%" status)
+                (break)))
+
+          (if (equal status 0)
+              params
+              nil)))))
 
 (defun hci-reset (hci)
   "Reset the controller"
@@ -640,6 +712,32 @@
                  ;; active
                  :enable (if enable #x01 #x00)
                  :filter-duplicates #x00) hci))
+
+(defun hci-create-connection (address hci)
+  (hci-send-cmd
+   (make-hci-cmd :create-connection
+                 :scan-interval 60
+                 :scan-window 60
+                 :filter-policy 0
+                 :peer-address-type (getf address :type)
+                 :peer-address (getf address :address)
+                 :own-address-type #x01 ; random
+                 :interval-min 100
+                 :interval-max 100
+                 :max-latency 0
+                 :supervision-timeout 200
+                 :min-connection-event-length 0
+                 :max-connection-event-length #xffff) hci))
+
+;; TODO: define all error codes
+(defconstant +remote-user-terminated+ #x13)
+
+(defun hci-disconnect (handle hci)
+  (hci-send-cmd
+   (make-hci-cmd :disconnect
+                 :handle handle
+                 :reason +remote-user-terminated+)
+   hci))
 
 (defconstant +ad-types+
   (list :flags #x01
@@ -775,6 +873,27 @@
 (make-ad-name "🎉")
  ; => (5 9 240 159 142 137)
 
+(defun wait-for-scan-report (predicate hci)
+  ;; TODO: assume we can get other events
+  (let ((evt (receive hci)))
+    (when (eql (car evt) :le-scan-report)
+      (let ((report (find-if predicate (getf (nth 1 evt) :reports))))
+        (when report
+          (list :type (getf report :address-type)
+                :address (getf report :address)))))))
+
+(defun wait-for-conn (hci)
+  ;; TODO: assume we can get other events
+  (let ((evt (receive hci)))
+    (when (eql (car evt) :le-enh-conn-complete)
+      (getf (nth 1 evt) :handle))))
+
+(defun wait-for-disconn (hci)
+  ;; TODO: assume we can get other events
+  (let ((evt (receive hci)))
+    (when (eql (car evt) :disconnection-complete)
+      (getf (nth 1 evt) :handle))))
+
 (with-hci hci *h2c-path* *c2h-path*
   (format t "================ enter ===============~%")
   (hci-reset hci)
@@ -786,11 +905,29 @@
   (hci-set-scan-enable t hci)
 
   (format t "RX ~A~%" (receive hci))
-  (format t "RX ~A~%" (receive hci))
-  (format t "RX ~A~%" (receive hci))
 
-  (hci-set-scan-enable nil hci)
+  ;; todo: fix hci param ordering
+  (let ((address (wait-for-scan-report (lambda (x) (declare (ignore x)) t) hci))
+        (handle))
+    ;; Stop scanning
+    (hci-set-scan-enable nil hci)
 
-  (format t "HCI: ~X~%" hci)
+    ;; Initiate the connection
+    (format t "Connecting to peer ~A~%" address)
+    (hci-create-connection address hci)
+
+    ;; Wait for the connection event
+    (setf handle (wait-for-conn hci))
+
+    ;; Wait a bit
+    (sleep 2)
+
+    ;; Disconnect
+    (format t "Disconnecting from handle ~A~%" handle)
+    (hci-disconnect handle hci)
+    (wait-for-disconn hci)
+    )
+
+  ;; (format t "HCI: ~X~%" hci)
   (format t "================ exit ===============~%")
   )
