@@ -189,6 +189,19 @@
     :set-adv-enable
     (#x200a (:enable :u8) (:status :u8))
 
+    :set-scan-param
+    (#x200B (:type :u8
+             :interval :u16
+             :window :u16
+             :own-address-type :u8
+             :filter-policy :u8)
+     (:status :u8))
+
+    :set-scan-enable
+    (#x200C (:enable :u8
+             :filter-duplicates :u8)
+     (:status :u8))
+
     :read-buffer-size
     (#x2002
      nil
@@ -272,9 +285,42 @@
 (evt-cmd-status '(#x1 #x1 #x3 #xc))
  ; => (:CMD-STATUS (:STATUS 1 :NCMD 1 :OPCODE 3075))
 
+(defun decode-adv-report (payload)
+  (let* ((num-reports (pull-int payload :u8))
+         (reports
+           (loop for i from 0 to (- num-reports 1)
+                 collect
+                 (let* ((event-type (pull-int payload :u8))
+                        (address-type (pull-int payload :u8))
+                        (address (pull payload 6))
+                        (data-length (pull-int payload :u8))
+                        (data (pull payload data-length))
+                        (rssi (pull-int payload :u8))) ; i8 technically
+                   (list
+                    :event-type event-type
+                    :address-type address-type
+                    :address address
+                    :data-length data-length
+                    :data data
+                    :rssi rssi)))))
+    (list :num-reports num-reports
+          :reports reports)))
+
+(defun decode-le-meta (payload)
+  (let ((sub (pull-int payload :u8)))
+    (case sub
+      (#x02 (decode-adv-report payload))
+      (otherwise (list :unknown payload)))))
+
+(defun evt-le-meta (payload)
+  (list
+   :le-meta
+   (decode-le-meta payload)))
+
 (defparameter *hci-events*
   '(#x0e evt-cmd-complete
-    #x0f evt-cmd-status))
+    #x0f evt-cmd-status
+    #x3e evt-le-meta))
 
 (getf *hci-events* #x0e)
  ; => EVT-CMD-COMPLETE
@@ -288,7 +334,7 @@
          (handler (getf *hci-events* opcode)))
     (declare (ignore len))
 
-    (if (not handler) (error "No entry for op ~X" opcode))
+    (if (not handler) (error "No entry for op ~X [payload ~A]" opcode payload))
 
     (funcall handler payload)))
 
@@ -441,6 +487,15 @@
         (:evt (decode-hci-event header payload))
         (t (error "doesn't look like anything to me"))))))
 
+(defun receive-cmd (hci)
+  "Receive and decode the HCI stream until getting a command response"
+  ;; TODO: add timeout maybe? But what about bsim blocking process?
+  (loop
+        (let ((evt (receive hci)))
+          (when (or (eql (car evt) :cmd-status)
+                    (eql (car evt) :cmd-complete))
+            (return-from receive-cmd evt)))))
+
 ;;;;;;;;;;;;; host
 
 (defun make-hci-dev (h2c-stream c2h-stream)
@@ -494,7 +549,7 @@
   "Send a command and check it's return status. Return params if no error."
 
   (send :cmd cmd hci)
-  (let ((response (receive hci)))
+  (let ((response (receive-cmd hci)))
     ;; Here `response` is an HCI event object, e.g.
     ;; (CMD-COMPLETE (NCMD 1 OPCODE C03 PARAMS (STATUS 0)))
     (format t "RX: ~x~%" response)
@@ -569,6 +624,22 @@
     (hci-send-cmd
      (make-hci-cmd :set-adv-data
                    :len (length flattened) :data flattened) hci)))
+
+(defun hci-set-scan-param (hci)
+  (hci-send-cmd
+   (make-hci-cmd :set-scan-param
+                 :type #x01             ; active scan
+                 :interval 60
+                 :window 60
+                 :own-address-type #x01
+                 :filter-policy 0) hci))
+
+(defun hci-set-scan-enable (enable hci)
+  (hci-send-cmd
+   (make-hci-cmd :set-scan-enable
+                 ;; active
+                 :enable (if enable #x01 #x00)
+                 :filter-duplicates #x00) hci))
 
 (defconstant +ad-types+
   (list :flags #x01
@@ -711,15 +782,14 @@
   (hci-allow-all-the-events hci)
   (hci-set-random-address #xC1234567890A hci)
 
-  ;; Advertise for a short minute
-  (hci-set-adv-param hci)
-  (hci-set-adv-data (list
-                     (make-ad :flags '(#x01)) ; LE General discoverable
-                     (make-ad-name "🔵-🦷"))
-                    hci)
-  (hci-set-adv-enable t hci)
-  (sleep .1)
-  (hci-set-adv-enable nil hci)
+  (hci-set-scan-param hci)
+  (hci-set-scan-enable t hci)
+
+  (format t "RX ~A~%" (receive hci))
+  (format t "RX ~A~%" (receive hci))
+  (format t "RX ~A~%" (receive hci))
+
+  (hci-set-scan-enable nil hci)
 
   (format t "HCI: ~X~%" hci)
   (format t "================ exit ===============~%")
