@@ -21,10 +21,10 @@
 
 (defun u2b (type)
   (case type
-     (:u8 1)
-     (:u16 2)
-     (:u32 4)
-     (:u64 8)))
+    (:u8 1)
+    (:u16 2)
+    (:u32 4)
+    (:u64 8)))
 
 (defun custom-type (type)
   (case type
@@ -112,8 +112,8 @@
 
 (defun open-simplex-fd (path is-output)
   (let ((file (if is-output
-                 (open path :direction :output :if-exists :overwrite)
-                 (open path :direction :input))))
+                  (open path :direction :output :if-exists :overwrite)
+                  (open path :direction :input))))
     (make-simplex-raw-fd-stream file is-output)))
 
 (defun sim-wait (ms sim)
@@ -466,7 +466,7 @@
 ;  => "(36 32 4 200 0 232 3)
 ; "
 
-(defun send (type payload hci)
+(defun send (hci type payload)
   "Format a payload into H4 and send to hci device"
   (let ((stream (getf hci :h2c))
         (packet (make-h4 type payload)))
@@ -564,10 +564,10 @@
   "Receive and decode the HCI stream until getting a command response"
   ;; TODO: add timeout maybe? But what about bsim blocking process?
   (loop
-        (let ((evt (receive hci)))
-          (when (or (eql (car evt) :cmd-status)
-                    (eql (car evt) :cmd-complete))
-            (return-from receive-cmd evt)))))
+    (let ((evt (receive hci)))
+      (when (or (eql (car evt) :cmd-status)
+                (eql (car evt) :cmd-complete))
+        (return-from receive-cmd evt)))))
 
 ;;;;;;;;;;;;; host
 
@@ -618,10 +618,10 @@
 ;;   (sim-wait 1000 sim)
 ;;   (sim-terminate sim))
 
-(defun hci-send-cmd (cmd hci)
+(defun hci-send-cmd (hci cmd)
   "Send a command and check it's return status. Return status/params if no error."
 
-  (send :cmd cmd hci)
+  (send hci :cmd cmd)
   (let ((response (receive-cmd hci)))
     ;; Here `response` is an HCI event object, e.g.
     ;; (CMD-COMPLETE (NCMD 1 OPCODE C03 PARAMS (STATUS 0)))
@@ -650,12 +650,12 @@
 
 (defun hci-reset (hci)
   "Reset the controller"
-  (hci-send-cmd (make-hci-cmd :reset) hci))
+  (hci-send-cmd hci (make-hci-cmd :reset)))
 
 (defun hci-read-buffer-size (hci)
   "Read (and set) H->C buffer lengths and amount"
   (let ((params
-          (hci-send-cmd (make-hci-cmd :read-buffer-size) hci)))
+          (hci-send-cmd hci (make-hci-cmd :read-buffer-size))))
 
     (if params
         (let ((le-len (getf params :le-len))
@@ -667,20 +667,21 @@
 
 (defun hci-allow-all-the-events (hci)
   "Allow controller to send us all the possible events"
-  (hci-send-cmd (make-hci-cmd :set-event-mask
-                              :events +u64-max+) hci)
-  (hci-send-cmd (make-hci-cmd :le-set-event-mask
-                              :events +u64-max+) hci))
+  (hci-send-cmd hci (make-hci-cmd :set-event-mask
+                                  :events +u64-max+))
+  (hci-send-cmd hci (make-hci-cmd :le-set-event-mask
+                                  :events +u64-max+)))
 
-(defun hci-set-random-address (address hci)
-  (let ((status (hci-send-cmd (make-hci-cmd :set-random-address
-                                            :address address) hci)))
+(defun hci-set-random-address (hci address)
+  (let ((status (hci-send-cmd hci (make-hci-cmd :set-random-address
+                                                :address address))))
     (if status
         (setf (getf hci :random-address) address))))
 
 (defun hci-set-adv-param (hci)
   ;; We hardcode connectable advertising to get started
   (hci-send-cmd
+   hci
    (make-hci-cmd :set-adv-param
                  :min-interval 60
                  :max-interval 60
@@ -694,36 +695,40 @@
                  ;; use all channels
                  :channel-map #b111
                  ;; #nofilter
-                 :filter-policy 0) hci))
+                 :filter-policy 0)))
 
 (defun hci-set-adv-enable (enable hci)
-  (hci-send-cmd (make-hci-cmd :set-adv-enable :enable (if enable 1 0)) hci))
+  (hci-send-cmd hci (make-hci-cmd :set-adv-enable :enable (if enable 1 0))))
 
-(defun hci-set-adv-data (data hci)
+(defun hci-set-adv-data (hci data)
   "Sets advertising data. Input is a list of AD structures (byte lists)."
   (let ((flattened (mapcan #'append data)))
     (hci-send-cmd
+     hci
      (make-hci-cmd :set-adv-data
-                   :len (length flattened) :data flattened) hci)))
+                   :len (length flattened) :data flattened))))
 
 (defun hci-set-scan-param (hci)
   (hci-send-cmd
+   hci
    (make-hci-cmd :set-scan-param
                  :type #x01             ; active scan
                  :interval 60
                  :window 60
                  :own-address-type #x01
-                 :filter-policy 0) hci))
+                 :filter-policy 0)))
 
-(defun hci-set-scan-enable (enable hci)
+(defun hci-set-scan-enable (hci enable)
   (hci-send-cmd
+   hci
    (make-hci-cmd :set-scan-enable
                  ;; active
                  :enable (if enable #x01 #x00)
-                 :filter-duplicates #x00) hci))
+                 :filter-duplicates #x00)))
 
-(defun hci-create-connection (address hci)
+(defun hci-create-connection (hci address)
   (hci-send-cmd
+   hci
    (make-hci-cmd :create-connection
                  :scan-interval 60
                  :scan-window 60
@@ -736,17 +741,17 @@
                  :max-latency 0
                  :supervision-timeout 200
                  :min-connection-event-length 0
-                 :max-connection-event-length #xffff) hci))
+                 :max-connection-event-length #xffff)))
 
 ;; TODO: define all error codes
 (defconstant +remote-user-terminated+ #x13)
 
-(defun hci-disconnect (handle hci)
+(defun hci-disconnect (hci handle)
   (hci-send-cmd
+   hci
    (make-hci-cmd :disconnect
                  :handle handle
-                 :reason +remote-user-terminated+)
-   hci))
+                 :reason +remote-user-terminated+)))
 
 (defconstant +ad-types+
   (list :flags #x01
@@ -882,7 +887,7 @@
 (make-ad-name "🎉")
  ; => (5 9 240 159 142 137)
 
-(defun wait-for-scan-report (predicate hci)
+(defun wait-for-scan-report (hci predicate)
   ;; TODO: assume we can get other events
   (let ((evt (receive hci)))
     (when (eql (car evt) :le-scan-report)
@@ -908,37 +913,37 @@
 ;; - find-information-req
 ;; - read-req
 (defconstant +att-opcodes+
-    (list :error-rsp #x01
-          :exchange-mtu-req #x02
-          :exchange-mtu-rsp #x03
-          :find-information-req #x04
-          :find-information-rsp #x05
-          :find-by-type-value-req #x06
-          :find-by-type-value-rsp #x07
-          :read-by-type-req #x08
-          :read-by-type-rsp #x09
-          :read-req #x0A
-          :read-rsp #x0B
-          :read-blob-req #x0C
-          :read-blob-rsp #x0D
-          :read-multiple-req #x0E
-          :read-multiple-rsp #x0F
-          :read-by-group-type-req #x10
-          :read-by-group-type-rsp #x11
-          :write-req #x12
-          :write-rsp #x13
-          :write-cmd #x52
-          :prepare-write-req #x16
-          :prepare-write-rsp #x17
-          :execute-write-req #x18
-          :execute-write-rsp #x19
-          :read-multiple-variable-req #x20
-          :read-multiple-variable-rsp #x21
-          :multiple-handle-value-ntf #x23
-          :handle-value-ntf #x1B
-          :handle-value-ind #x1D
-          :handle-value-cfm #x1E
-          :signed-write-cmd #xD2))
+  (list :error-rsp #x01
+        :exchange-mtu-req #x02
+        :exchange-mtu-rsp #x03
+        :find-information-req #x04
+        :find-information-rsp #x05
+        :find-by-type-value-req #x06
+        :find-by-type-value-rsp #x07
+        :read-by-type-req #x08
+        :read-by-type-rsp #x09
+        :read-req #x0A
+        :read-rsp #x0B
+        :read-blob-req #x0C
+        :read-blob-rsp #x0D
+        :read-multiple-req #x0E
+        :read-multiple-rsp #x0F
+        :read-by-group-type-req #x10
+        :read-by-group-type-rsp #x11
+        :write-req #x12
+        :write-rsp #x13
+        :write-cmd #x52
+        :prepare-write-req #x16
+        :prepare-write-rsp #x17
+        :execute-write-req #x18
+        :execute-write-rsp #x19
+        :read-multiple-variable-req #x20
+        :read-multiple-variable-rsp #x21
+        :multiple-handle-value-ntf #x23
+        :handle-value-ntf #x1B
+        :handle-value-ind #x1D
+        :handle-value-cfm #x1E
+        :signed-write-cmd #xD2))
 
 (defun att-make-opcode (op-name)
   (make-c-int :u8 (getf +att-opcodes+ op-name)))
@@ -946,6 +951,23 @@
 (defun att-make-packet (op param)
   ;; TODO: check param is MTU-1
   (append (att-make-opcode op) param))
+
+(defun hci-send-acl (hci conn-handle packet)
+  (send hci
+        :acl
+        (append
+         (make-c-int :u16 conn-handle)
+         (make-c-int :u16 (length packet))
+         packet)))
+
+(defun l2cap-send (hci conn-handle channel packet)
+  (hci-send-acl
+   hci
+   conn-handle
+   (append
+    (make-c-int :u16 (length packet))
+    (make-c-int :u16 channel)
+    packet)))
 
 (defconstant +l2cap-att-chan+ #x0004)
 
@@ -957,43 +979,26 @@
    (att-make-packet :exchange-mtu-req
                     (make-c-int :u16 mtu))))
 
-(defun l2cap-send (hci conn-handle channel packet)
-  (hci-send-acl
-   hci
-   conn-handle
-   (append
-    (make-c-int :u16 (length packet))
-    (make-c-int :u16 channel)
-    packet)))
-
-(defun hci-send-acl (hci conn-handle packet)
-  (send :acl
-        (append
-         (make-c-int :u16 conn-handle)
-         (make-c-int :u16 (length packet))
-         packet) hci))
-
 (with-hci hci *h2c-path* *c2h-path*
   (format t "================ enter ===============~%")
   (hci-reset hci)
   (hci-read-buffer-size hci)
   (hci-allow-all-the-events hci)
-  (hci-set-random-address #xC1234567890A hci)
+  (hci-set-random-address hci #xC1234567890A)
 
   (hci-set-scan-param hci)
-  (hci-set-scan-enable t hci)
+  (hci-set-scan-enable hci t)
 
   (format t "RX ~A~%" (receive hci))
 
-  ;; todo: fix hci param ordering
-  (let ((address (wait-for-scan-report (lambda (x) (declare (ignore x)) t) hci))
+  (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
         (handle))
     ;; Stop scanning
-    (hci-set-scan-enable nil hci)
+    (hci-set-scan-enable hci nil)
 
     ;; Initiate the connection
     (format t "Connecting to peer ~A~%" address)
-    (hci-create-connection address hci)
+    (hci-create-connection hci address)
 
     ;; Wait for the connection event
     (setf handle (wait-for-conn hci))
@@ -1014,7 +1019,7 @@
 
     ;; Disconnect
     (format t "Disconnecting from handle ~A~%" handle)
-    (hci-disconnect handle hci)
+    (hci-disconnect hci handle)
     (wait-for-disconn hci)
     )
 
