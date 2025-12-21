@@ -555,19 +555,34 @@
            (payload (getf packet :payload)))
 
       (case opcode
-        (:evt (decode-hci-event header payload))
-        (:acl (progn (format t "[ACL] ~A~%" payload)
-                     payload))
+        (:evt (list :evt (decode-hci-event header payload)))
+        (:acl (list :acl payload))
         (t (error "doesn't look like anything to me"))))))
 
-(defun receive-cmd (hci)
-  "Receive and decode the HCI stream until getting a command response"
+(defun add-to-rxq (hci packet)
+  ;; to the bin..
+  (declare (ignore packet hci)))
+
+(defun receive-if (hci predicate)
   ;; TODO: add timeout maybe? But what about bsim blocking process?
   (loop
-    (let ((evt (receive hci)))
-      (when (or (eql (car evt) :cmd-status)
-                (eql (car evt) :cmd-complete))
-        (return-from receive-cmd evt)))))
+    (let ((packet (receive hci)))
+      (if (funcall predicate packet)
+          ;; strip the H4 header
+          (return-from receive-if (cadr packet))
+          (add-to-rxq hci packet)))))
+
+(defun receive-cmd (hci)
+  "Wait for the next command response/status"
+  (receive-if
+   hci
+   (lambda (packet)
+     ;; TODO: also check for command-id
+     (progn
+       ;; (break)
+       (and (eql (car packet) :evt)
+            (or (eql (car (cadr packet)) :cmd-status)
+                (eql (car (cadr packet)) :cmd-complete)))))))
 
 ;;;;;;;;;;;;; host
 
@@ -887,26 +902,27 @@
 (make-ad-name "🎉")
  ; => (5 9 240 159 142 137)
 
+(defun evt? (evt-code)
+  (lambda (packet)
+    (eql (car (cadr packet)) evt-code)))
+
 (defun wait-for-scan-report (hci predicate)
   ;; TODO: assume we can get other events
-  (let ((evt (receive hci)))
-    (when (eql (car evt) :le-scan-report)
-      (let ((report (find-if predicate (getf (nth 1 evt) :reports))))
-        (when report
-          (list :type (getf report :address-type)
-                :address (getf report :address)))))))
+  (let ((evt (receive-if hci (evt? :le-scan-report))))
+    (let ((report (find-if predicate (getf (nth 1 evt) :reports))))
+      (when report
+        (list :type (getf report :address-type)
+              :address (getf report :address))))))
 
 (defun wait-for-conn (hci)
   ;; TODO: assume we can get other events
-  (let ((evt (receive hci)))
-    (when (eql (car evt) :le-enh-conn-complete)
-      (getf (nth 1 evt) :handle))))
+  (let ((evt (receive-if hci (evt? :le-enh-conn-complete))))
+    (getf (nth 1 evt) :handle)))
 
 (defun wait-for-disconn (hci)
   ;; TODO: assume we can get other events
-  (let ((evt (receive hci)))
-    (when (eql (car evt) :disconnection-complete)
-      (getf (nth 1 evt) :handle))))
+  (let ((evt (receive-if hci (evt? :disconnection-complete))))
+    (getf (nth 1 evt) :handle)))
 
 ;; Mandatory:
 ;; - error-rsp
