@@ -545,6 +545,12 @@
      :payload payload
      :raw packet)))
 
+(defun decode-hci-acl (header payload)
+  (list :conn-handle (logand (decode-c-int header) #x0FFF)
+        :length (pull-int payload :u16)
+        :channel (pull-int payload :u16)
+        :data payload))
+
 (defun receive (hci)
   "Receive and decode a single HCI packet"
   ;; initial implementation is H4
@@ -556,7 +562,7 @@
 
       (case opcode
         (:evt (list :evt (decode-hci-event header payload)))
-        (:acl (list :acl payload))
+        (:acl (list :acl (decode-hci-acl header payload)))
         (t (error "doesn't look like anything to me"))))))
 
 (defun add-to-rxq (hci packet)
@@ -987,13 +993,33 @@
 
 (defconstant +l2cap-att-chan+ #x0004)
 
+(defun att? (conn-handle opcode-value)
+  (lambda (p)
+    ;; sample p: (ACL (CONN-HANDLE 0 LENGTH 3 CHANNEL 4 DATA (3 40 1)))
+    (and (eql (car p) :acl)
+         (eql (getf (cadr p) :conn-handle)
+              conn-handle)
+         (eql (getf (cadr p) :channel)
+              +l2cap-att-chan+)
+         (eql (car (getf (cadr p) :data))
+              (car opcode-value)))))
+
+(defun att-receive (hci conn-handle opcode)
+  (receive-if hci (att? conn-handle (att-make-opcode opcode))))
+
 (defun att-set-mtu (hci conn-handle mtu)
+  ;; Send client RX MTU
   (l2cap-send
    hci
    conn-handle
    +l2cap-att-chan+
    (att-make-packet :exchange-mtu-req
-                    (make-c-int :u16 mtu))))
+                    (make-c-int :u16 mtu)))
+  ;; Response is server RX MTU
+  (let ((rsp (att-receive hci conn-handle :exchange-mtu-rsp)))
+    (when rsp
+      (pull-int (getf rsp :data) :u8)     ; opcode
+      (pull-int (getf rsp :data) :u16)))) ; server RX MTU
 
 ;; Async design:
 ;;
@@ -1010,6 +1036,13 @@
 ;; idle loop:
 ;; -> pull from HCI-RX, dispatch events/data
 ;; -> pull from HCI-RAW-RX, dispatch directly
+;;
+;; TODO
+;; - [x] add packet filtering
+;; - [] add packet queues
+;; - [x] decode ATT packets
+;; - [] add NCP / TX queues
+;; - [] add processing of queues?
 
 (with-hci hci *h2c-path* *c2h-path*
   (format t "================ enter ===============~%")
@@ -1040,14 +1073,10 @@
 
     ;; Upgrade MTU
     (format t "Upgrading MTU..~%")
-    (att-set-mtu hci handle 255)
-    ;; ncp
-    (format t "RX ~A~%" (receive hci))
-    ;; att response
-    (format t "RX ~A~%" (receive hci))
+    (format t "Negotiated MTU ~A~%" (att-set-mtu hci handle 255))
 
     ;; Wait a bit
-    (sleep 2)
+    (sleep .5)
 
     ;; Disconnect
     (format t "Disconnecting from handle ~A~%" handle)
