@@ -1060,6 +1060,22 @@
 ;; - [x] decode ATT packets
 ;; - [] add NCP / TX queues
 ;; - [] add processing of queues?
+;;
+;; GATT Client
+;; - [] error pdu
+;; - [] find-information
+;; - [] read/write
+;; - [] subscribe (CCCD)
+;;
+;; GATT Server
+;; - [] error pdu
+;; - [] find-information
+;; - [] read/write
+;; - [] notifications
+;;
+;; SMP
+;; - [] periph security request
+;; - [] JustWorks pairing
 
 (defun process-rx (hci)
   ;; Just print the packets for now
