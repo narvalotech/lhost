@@ -381,10 +381,14 @@
               :reason (pull-int payload :u8))))
 
 (defun evt-num-completed-packets (payload)
-  (list :number-of-completed-packets
-        (list :num-handles (pull-int payload :u8)
-              ;; TODO: decode later
-              :payload payload)))
+  (let ((parsed
+          (list :number-of-completed-packets
+                (list :num-handles (pull-int payload :u8)
+                      :handle (pull-int payload :u16)
+                      :num (pull-int payload :u16)))))
+    (when (> (getf (cadr parsed) :num-handles) 1)
+      (error "Got NCP with >1 conn handle."))
+    parsed))
 
 (defparameter *hci-events*
   '(#x05 evt-disc-complete
@@ -566,13 +570,15 @@
         (t (error "doesn't look like anything to me"))))))
 
 (defun add-to-rxq (hci packet)
-  ;; to the bin..
-  (declare (ignore packet hci)))
+  (push packet (getf hci :rxq)))
 
-(defun receive-if (hci predicate)
+(defun receive-rxq (hci)
+  (pop (getf hci :rxq)))
+
+(defun receive-if (hci predicate &key (from-list nil))
   ;; TODO: add timeout maybe? But what about bsim blocking process?
   (loop
-    (let ((packet (receive hci)))
+    (let ((packet (if from-list (receive-rxq hci) (receive hci))))
       (if (funcall predicate packet)
           ;; strip the H4 header
           (return-from receive-if (cadr packet))
@@ -596,6 +602,7 @@
   (list
    :h2c h2c-stream
    :c2h c2h-stream
+   :rxq '()
    :acl-tx-size 0
    :acl-tx-num 0
    :acl-rx-size 0
@@ -913,7 +920,7 @@
     (eql (car (cadr packet)) evt-code)))
 
 (defun wait-for-scan-report (hci predicate)
-  ;; TODO: assume we can get other events
+  ;; TODO: handle multiple reports
   (let ((evt (receive-if hci (evt? :le-scan-report))))
     (let ((report (find-if predicate (getf (nth 1 evt) :reports))))
       (when report
@@ -921,14 +928,24 @@
               :address (getf report :address))))))
 
 (defun wait-for-conn (hci)
-  ;; TODO: assume we can get other events
   (let ((evt (receive-if hci (evt? :le-enh-conn-complete))))
     (getf (nth 1 evt) :handle)))
 
 (defun wait-for-disconn (hci)
-  ;; TODO: assume we can get other events
   (let ((evt (receive-if hci (evt? :disconnection-complete))))
     (getf (nth 1 evt) :handle)))
+
+(defun ncp? (conn-handle)
+  (lambda (p)
+    (and (eql (car p) :evt)
+         (eql (car (cadr p)) :number-of-completed-packets)
+         (eql (getf (cadr (cadr p)) :handle) conn-handle))))
+
+(defun wait-for-ncp (hci handle)
+  (let ((queued (receive-if hci (ncp? handle) :from-list t)))
+    (if queued
+        queued
+        (receive-if hci (ncp? handle)))))
 
 ;; Mandatory:
 ;; - error-rsp
@@ -1039,10 +1056,18 @@
 ;;
 ;; TODO
 ;; - [x] add packet filtering
-;; - [] add packet queues
+;; - [x] add packet queues
 ;; - [x] decode ATT packets
 ;; - [] add NCP / TX queues
 ;; - [] add processing of queues?
+
+(defun process-rx (hci)
+  ;; Just print the packets for now
+  (loop
+    (let ((packet (receive-rxq hci)))
+      (unless packet
+        (return-from process-rx nil))
+      (format t "RXQ: ~A~%" packet))))
 
 (with-hci hci *h2c-path* *c2h-path*
   (format t "================ enter ===============~%")
@@ -1074,6 +1099,8 @@
     ;; Upgrade MTU
     (format t "Upgrading MTU..~%")
     (format t "Negotiated MTU ~A~%" (att-set-mtu hci handle 255))
+    ;; Wait for NCP belonging to ATT REQ
+    (format t "NCP: ~A~%" (wait-for-ncp hci handle))
 
     ;; Wait a bit
     (sleep .5)
@@ -1082,6 +1109,9 @@
     (format t "Disconnecting from handle ~A~%" handle)
     (hci-disconnect hci handle)
     (wait-for-disconn hci)
+
+    ;; Process ignored packets
+    (process-rx hci)
     )
 
   ;; (format t "HCI: ~X~%" hci)
