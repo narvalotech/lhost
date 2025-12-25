@@ -549,11 +549,43 @@
      :payload payload
      :raw packet)))
 
-(defun decode-hci-acl (header payload)
-  (list :conn-handle (logand (decode-c-int header) #x0FFF)
-        :length (pull-int payload :u16)
-        :channel (pull-int payload :u16)
-        :data payload))
+(defun append-to-acl-in (hci fragment)
+  (setf (getf hci :acl-in)
+        (append (getf hci :acl-in) fragment)))
+
+(defun decode-l2cap (conn fragment)
+  (list :conn-handle conn
+        :length (pull-int fragment :u16)
+        :channel (pull-int fragment :u16)
+        :data fragment))
+
+(defconstant +l2-hdr-size+ 4)
+
+(defun complete-acl (hci conn fragment)
+  ;; for now only one conn supported
+  (let* ((l2pac (append-to-acl-in hci fragment))
+         (l2size
+           (+ +l2-hdr-size+
+              (decode-c-int (subseq l2pac 0 2))))
+         (current-size (length l2pac)))
+    ;; TODO: error handling?
+    (format t "[ACL-APPEND] (~A/~A) ~X~%" current-size l2size l2pac)
+    (if (= l2size current-size)
+        (progn
+          (setf (getf hci :acl-in) '())
+          (decode-l2cap conn l2pac))
+        nil)))
+
+(defun decode-acl-type (header)
+  (ldb (byte 2 12) (logand (decode-c-int header) #xB000)))
+
+(defun decode-hci-acl (hci header payload)
+  (let ((conn-handle (logand (decode-c-int header) #x0FFF))
+        (pb-flag (decode-acl-type header)))
+    (if (zerop pb-flag)
+        ;; This branch is dead code with the current controller rn
+        (decode-l2cap conn-handle payload)
+        (complete-acl hci conn-handle payload))))
 
 (defun receive (hci)
   "Receive and decode a single HCI packet"
@@ -566,11 +598,12 @@
 
       (case opcode
         (:evt (list :evt (decode-hci-event header payload)))
-        (:acl (list :acl (decode-hci-acl header payload)))
+        (:acl (list :acl (decode-hci-acl hci header payload)))
         (t (error "doesn't look like anything to me"))))))
 
 (defun add-to-rxq (hci packet)
-  (push packet (getf hci :rxq)))
+  (when (cadr packet)
+    (push packet (getf hci :rxq))))
 
 (defun receive-rxq (hci)
   (pop (getf hci :rxq)))
@@ -603,6 +636,7 @@
    :h2c h2c-stream
    :c2h c2h-stream
    :rxq '()
+   :acl-in '()
    :acl-tx-size 0
    :acl-tx-num 0
    :acl-rx-size 0
@@ -1024,12 +1058,14 @@
 (defun att-receive (hci conn-handle opcode)
   (receive-if hci (att? conn-handle (att-make-opcode opcode))))
 
+(defun att-send (hci conn-handle payload)
+  (l2cap-send hci conn-handle +l2cap-att-chan+ payload))
+
 (defun att-set-mtu (hci conn-handle mtu)
   ;; Send client RX MTU
-  (l2cap-send
+  (att-send
    hci
    conn-handle
-   +l2cap-att-chan+
    (att-make-packet :exchange-mtu-req
                     (make-c-int :u16 mtu)))
   ;; Response is server RX MTU
@@ -1060,10 +1096,11 @@
 ;; - [x] decode ATT packets
 ;; - [] add NCP / TX queues
 ;; - [] add processing of queues?
+;; - [x] acl (RX) fragmentation
 ;;
 ;; GATT Client
 ;; - [] error pdu
-;; - [] find-information
+;; - [x] find-information
 ;; - [] read/write
 ;; - [] subscribe (CCCD)
 ;;
@@ -1076,6 +1113,34 @@
 ;; SMP
 ;; - [] periph security request
 ;; - [] JustWorks pairing
+
+(defun decode-handles-and-uuids (data &key 128-bit)
+  (loop while data collecting
+        (if 128-bit
+            (list :handle (pull-int data :u16)
+                  :uuid-128 (pull data 16))
+            (list :handle (pull-int data :u16)
+                  :uuid-16 (pull-int data :u16)))))
+
+(defun att-decode-find-information-rsp (data)
+  (let ((128-bit (= 2 (pull-int data :u8))))
+    (decode-handles-and-uuids data :128-bit 128-bit)))
+
+(defun att-find-information (hci conn-handle
+                             &optional (start 1) (end #xFFFF))
+  (unless (> end start)
+    (error "Bad handle range [~A:~A]" start end))
+  (att-send hci conn-handle
+            (att-make-packet :find-information-req
+                             (append
+                              (make-c-int :u16 start)
+                              (make-c-int :u16 end))))
+  (let* ((rsp (att-receive hci conn-handle :find-information-rsp))
+         (data (getf rsp :data)))
+    (when rsp
+      (pull-int data :u8)               ; opcode
+      (att-decode-find-information-rsp
+       data))))
 
 (defun process-rx (hci)
   ;; Just print the packets for now
@@ -1120,6 +1185,9 @@
 
     ;; Wait a bit
     (sleep .5)
+
+    ;; Read the GATT table
+    (format t "FI ~X~%" (att-find-information hci handle))
 
     ;; Disconnect
     (format t "Disconnecting from handle ~A~%" handle)
