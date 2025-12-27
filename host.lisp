@@ -1201,6 +1201,7 @@
 
 (defconstant +gatt-uuid-primary-service+ #x2800)
 (defconstant +gatt-uuid-characteristic+ #x2803)
+(defconstant +gatt-uuid-cccd+ #x2902)
 
 (defun encode-uuid (uuid)
   ;; TODO: 128-bit
@@ -1382,7 +1383,25 @@
     ))
 
 (defun gattc-print (table)
-  (format nil "~X" table))
+  (with-output-to-string (os)
+    (loop for attribute in table do
+      (case (getf attribute :type)
+        (:service
+         (format os "~4,'.,X SERVICE ~X~%"
+                 (getf attribute :handle)
+                 (getf attribute :uuid)))
+        (:characteristic-declaration
+         (format os "~4,'.,X   CHARACTERISTIC (PROP ~2,X) (UUID ~4,'0,X)~%"
+                 (getf attribute :handle)
+                 (getf attribute :properties)
+                 (getf attribute :uuid)))
+        (:characteristic-value
+         (format os "~4,'.,X     VALUE~%"
+                 (getf attribute :handle)))
+        (:characteristic-descriptor
+         (when (eql (getf attribute :uuid) +gatt-uuid-cccd+)
+           (format os "~4,'.,X     CCCD~%"
+                   (getf attribute :handle))))))))
 
 (defun process-rx (hci)
   ;; Just print the packets for now
