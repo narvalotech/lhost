@@ -985,6 +985,31 @@
 ;; - error-rsp
 ;; - find-information-req
 ;; - read-req
+(defconstant +att-errors+
+  (list :invalid-handle #x01
+        :read-not-permitted #x02
+        :write-not-permitted #x03
+        :invalid-pdu #x04
+        :insufficient-authentication #x05
+        :request-not-supported #x06
+        :invalid-offset #x07
+        :insufficient-authorization #x08
+        :prepare-queue-full #x09
+        :attribute-not-found #x0A
+        :attribute-not-long #x0B
+        :encryption-key-size-too-short #x0C
+        :invalid-attribute-value-length #x0D
+        :unlikely-error #x0E            ; zephyr host be like..
+        :insufficient-encryption #x0F
+        :unsupported-group-type #x10
+        :insufficient-resources #x11
+        :database-out-of-sync #x12
+        :value-not-allowed #x13
+        :application-error-start #x80
+        :application-error-end #x9F
+        :common-profile-and-service-errors-start #xE0
+        :common-profile-and-service-errors-end #xFF))
+
 (defconstant +att-opcodes+
   (list :error-rsp #x01
         :exchange-mtu-req #x02
@@ -1018,8 +1043,10 @@
         :handle-value-cfm #x1E
         :signed-write-cmd #xD2))
 
-(defun att-make-opcode (op-name)
-  (make-c-int :u8 (getf +att-opcodes+ op-name)))
+(defun att-make-opcode (op-name &optional single)
+  (if (not single)
+      (make-c-int :u8 (getf +att-opcodes+ op-name))
+      (getf +att-opcodes+ op-name)))
 
 (defun att-make-packet (op param)
   ;; TODO: check param is MTU-1
@@ -1052,8 +1079,8 @@
               conn-handle)
          (eql (getf (cadr p) :channel)
               +l2cap-att-chan+)
-         (eql (car (getf (cadr p) :data))
-              (car opcode-value)))))
+         (or (eql (car (getf (cadr p) :data)) (car opcode-value))
+             (eql (car (getf (cadr p) :data)) (att-make-opcode :error-rsp t))))))
 
 (defun att-receive (hci conn-handle opcode)
   (receive-if hci (att? conn-handle (att-make-opcode opcode))))
@@ -1099,8 +1126,9 @@
 ;; - [x] acl (RX) fragmentation
 ;;
 ;; GATT Client
-;; - [] error pdu
+;; - [x] error pdu
 ;; - [x] find-information
+;; - [x] discovery
 ;; - [] read/write
 ;; - [] subscribe (CCCD)
 ;;
@@ -1128,7 +1156,7 @@
 
 (defun att-find-information (hci conn-handle
                              &optional (start 1) (end #xFFFF))
-  (unless (> end start)
+  (unless (>= end start)
     (error "Bad handle range [~A:~A]" start end))
   (att-send hci conn-handle
             (att-make-packet :find-information-req
@@ -1138,9 +1166,223 @@
   (let* ((rsp (att-receive hci conn-handle :find-information-rsp))
          (data (getf rsp :data)))
     (when rsp
-      (pull-int data :u8)               ; opcode
-      (att-decode-find-information-rsp
-       data))))
+      (unless (att-error? (pull-int data :u8))
+        (att-decode-find-information-rsp data)))))
+
+(defun att-decode-read-by-group-type-rsp (data)
+  ;; All the attributes *must* have the same data length.
+  ;; We need to send another read-by-group for other lengths.
+  ;; who designed this smh
+  (let ((el-len (- (pull-int data :u8) 4)))
+    (loop while data
+          collecting
+          (list :handle (pull-int data :u16)
+                :end-handle (pull-int data :u16)
+                :value (pull data el-len)))))
+
+(defun att-error? (opcode)
+  (eql opcode (att-make-opcode :error-rsp t)))
+
+(defun att-read-by-group-type (hci conn-handle uuid
+                               &optional (start 1) (end #xFFFF))
+  (unless (> end start)
+    (error "Bad handle range [~A:~A]" start end))
+  (att-send hci conn-handle
+            (att-make-packet :read-by-group-type-req
+                             (append
+                              (make-c-int :u16 start)
+                              (make-c-int :u16 end)
+                              uuid)))
+  (let* ((rsp (att-receive hci conn-handle :read-by-group-type-rsp))
+         (data (getf rsp :data)))
+    (when rsp
+      (unless (att-error? (pull-int data :u8))
+        (att-decode-read-by-group-type-rsp data)))))
+
+(defconstant +gatt-uuid-primary-service+ #x2800)
+(defconstant +gatt-uuid-characteristic+ #x2803)
+
+(defun encode-uuid (uuid)
+  ;; TODO: 128-bit
+  (make-c-int :u16 uuid))
+
+(defun last-handle (rsp)
+  (getf (car (last rsp)) :end-handle))
+
+(defun discover-services (hci conn)
+  ;; Discover all (primary) services
+  ;; [v5.4 - p1489]
+  ;;
+  ;; response: (handle group-handle value)
+  ;; handle: Handle of service declaration
+  ;; end-handle: Last attribute in the service
+  ;; value: Service UUID
+  ;;
+  ;; Issue new reads until ATT-ERROR = not found (#x0A)
+  (let ((rsp t)
+        (start-handle #x0001))
+    (loop while rsp
+          nconcing
+          (progn
+            ;; TODO: better story for errors
+            (setf rsp (att-read-by-group-type
+                       hci conn (encode-uuid +gatt-uuid-primary-service+)
+                       start-handle))
+            (when rsp
+              (setf start-handle
+                    (1+ (last-handle rsp)))
+              ;; Do some translatin'
+              (mapcar
+               (lambda (el)
+                 (list
+                  :handle (getf el :handle)
+                  :type :service
+                  :end-handle   (getf el :end-handle)
+                  :uuid  (decode-c-int (getf el :value))))
+               rsp))))))
+
+(defun att-decode-read-by-type-rsp (data)
+  (let ((el-len (- (pull-int data :u8) 2)))
+    (loop while data
+          collecting
+          (list :handle (pull-int data :u16)
+                :value (pull data el-len)))))
+
+(defun att-read-by-type (hci conn-handle start end uuid)
+  (unless (> end start)
+    (error "Bad handle range [~A:~A]" start end))
+  (att-send hci conn-handle
+            (att-make-packet :read-by-type-req
+                             (append
+                              (make-c-int :u16 start)
+                              (make-c-int :u16 end)
+                              uuid)))
+  (let* ((rsp (att-receive hci conn-handle :read-by-type-rsp))
+         (data (getf rsp :data)))
+    (when rsp
+      (unless (att-error? (pull-int data :u8))
+        (att-decode-read-by-type-rsp data)))))
+
+(defun decode-char-discovery (attribute-list)
+  (list :properties (nth 0 attribute-list)
+        :value-handle (nth 1 attribute-list)
+        :uuid (nth 2 attribute-list)))
+
+(defun discover-chars (hci conn start end)
+  ;; Discover all characteristics
+  ;; [v5.4 p1494]
+  ;;
+  ;; response (opcode len (handle value))
+  ;; where value:
+  ;; - char props
+  ;; - value handle
+  ;; - uuid
+  (let ((rsp t))
+    (loop
+      until (or (not rsp)
+                (= end start))
+      nconcing
+      (progn
+        ;; TODO: better error handling
+        (setf rsp (att-read-by-type
+                   hci conn start end
+                   (encode-uuid +gatt-uuid-characteristic+)))
+        (when rsp
+          ;; Calculate handle for next request
+          (setf start (1+ (getf (car (last rsp)) :handle)))
+          (mapcar
+           (lambda (el)
+             (let* ((data (getf el :value))
+                    (uuid-size (- (length data) 3)))
+               (list
+                :handle (getf el :handle)
+                :type :characteristic-declaration
+                :properties (pull-int data :u8)
+                :value-handle (pull-int data :u16)
+                :uuid (if (= uuid-size 2)
+                          (pull-int data :u16)
+                          (pull data uuid-size)))))
+           rsp))))))
+
+(defun char-end-handle (value-handle chars)
+  (loop for char in chars
+        do (when (> (getf char :value-handle) value-handle)
+             (return-from char-end-handle (- (getf char :handle) 1))))
+  ;; If we reach the end, let's just use value-handle + 1
+  (1+ value-handle))
+
+(defun discover-char-descriptors (hci conn char chars)
+  ;; Discover all characteristic descriptors
+  ;; [v5.4 p1496]
+  ;;
+  ;; response (opcode len (handle value))
+  ;; where value:
+  ;; - char props
+  ;; - value handle
+  ;; - uuid
+  (let* ((rsp t)
+         (value-handle (getf char :value-handle))
+         (end (char-end-handle value-handle chars))
+         (start (1+ value-handle)))
+    (loop
+      until (or (not rsp) (> start end))
+      nconcing
+      (progn
+        ;; TODO: better error handling
+        (setf rsp (att-find-information hci conn start end))
+        (when rsp
+          ;; Calculate handle for next request
+          (setf start (1+ (getf (car (last rsp)) :handle)))
+          (format t "DESC ~A~%" rsp)
+          ;; TODO: add a dedicated CCCD type
+          (mapcar
+           (lambda (el)
+             ;; Skip the service declarations, we already have them
+             (unless (= (getf el :uuid-16) +gatt-uuid-primary-service+)
+               (list
+                :handle (getf el :handle)
+                :type :characteristic-descriptor
+                :uuid (getf el :uuid-16)
+                :uuid128 (getf el :uuid-128))))
+             rsp))))))
+
+(defun gattc-discover (hci conn)
+  (let* ((services (discover-services hci conn))
+         (characteristics
+           (apply #'nconc
+                  (mapcar
+                   (lambda (s) (discover-chars
+                                hci conn
+                                (getf s :handle)
+                                (getf s :end-handle)))
+                   services)))
+
+         (characteristic-values
+           (mapcar
+            (lambda (c)
+              (list
+               :handle (getf c :value-handle)
+               :type :characteristic-value
+               :uuid (getf c :uuid)))
+            characteristics))
+
+         (descriptors
+           (delete
+            nil
+            (apply #'nconc
+                   (mapcar
+                    (lambda (c) (discover-char-descriptors
+                                 hci conn c characteristics))
+                    characteristics)))))
+
+    (sort (nconc
+           services characteristics characteristic-values descriptors)
+          (lambda (a b)
+            (< (getf a :handle) (getf b :handle))))
+    ))
+
+(defun gattc-print (table)
+  (format nil "~X" table))
 
 (defun process-rx (hci)
   ;; Just print the packets for now
@@ -1163,7 +1405,8 @@
   (format t "RX ~A~%" (receive hci))
 
   (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
-        (handle))
+        (handle)
+        (gattc-table))
     ;; Stop scanning
     (hci-set-scan-enable hci nil)
 
@@ -1186,8 +1429,13 @@
     ;; Wait a bit
     (sleep .5)
 
-    ;; Read the GATT table
+    ;; Grug read GATT
     (format t "FI ~X~%" (att-find-information hci handle))
+
+    ;; Me, an intellectual:
+    (setf gattc-table (gattc-discover hci handle))
+    (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
+    (setf *test* gattc-table)
 
     ;; Disconnect
     (format t "Disconnecting from handle ~A~%" handle)
