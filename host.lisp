@@ -941,6 +941,13 @@
 (to-c-string "🔵-🦷")
  ; => (240 159 148 181 45 240 159 166 183)
 
+(defun from-c-string (bytes)
+  "Decode an ASCII-encoded string from a list of bytes"
+  ;; This one doesn't support UTF-8
+  (with-output-to-string (s)
+    (dolist (b bytes)
+      (write-char (code-char b) s))))
+
 (defun make-ad-name (name)
   (make-ad :name-complete (to-c-string name)))
 
@@ -1129,7 +1136,7 @@
 ;; - [x] error pdu
 ;; - [x] find-information
 ;; - [x] discovery
-;; - [] read/write
+;; - [-] read/write
 ;; - [] subscribe (CCCD)
 ;;
 ;; GATT Server
@@ -1202,6 +1209,8 @@
 (defconstant +gatt-uuid-primary-service+ #x2800)
 (defconstant +gatt-uuid-characteristic+ #x2803)
 (defconstant +gatt-uuid-cccd+ #x2902)
+(defconstant +gatt-uuid-heart-rate-measurement+ #x2A37)
+(defconstant +gatt-uuid-gap-device-name+ #x2A00)
 
 (defun encode-uuid (uuid)
   ;; TODO: 128-bit
@@ -1403,6 +1412,48 @@
            (format os "~4,'.,X     CCCD~%"
                    (getf attribute :handle))))))))
 
+(defun gattc-find-handle (table uuid)
+  "Find the characteristic value handle of UUID"
+  (getf
+   (find-if
+    (lambda (a) (and
+                 (eql :characteristic-value (getf a :type))
+                 (eql uuid
+                      (getf a :uuid))))
+    table)
+   :handle))
+
+(defun att-read (hci conn handle)
+  (format t "READING ~X~%" handle)
+  (att-send hci conn
+            (att-make-packet :read-req
+                             (append
+                              (make-c-int :u16 handle))))
+  (let* ((rsp (att-receive hci conn :read-rsp))
+         (data (getf rsp :data)))
+    (when rsp
+      (if (att-error? (pull-int data :u8))
+          (format t "ATT-READ-REQ ERROR: ~X~%" data)
+          data))))
+
+(defun find-gap-name-handle (table)
+  ;; Search for the GAP name value attribute
+  (gattc-find-handle table +gatt-uuid-gap-device-name+))
+
+(defun read-gap-name (hci conn table)
+  (let ((handle (find-gap-name-handle table)))
+    (when handle
+      (att-read hci conn handle))))
+
+(defun find-hr-handle (table)
+  ;; Search for the HR value attribute
+  (gattc-find-handle table +gatt-uuid-heart-rate-measurement+))
+
+(defun read-hr (hci conn table)
+  (let ((handle (find-hr-handle table)))
+    (when handle
+      (att-read hci conn handle))))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -1455,6 +1506,11 @@
     (setf gattc-table (gattc-discover hci handle))
     (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
     (setf *test* gattc-table)
+
+    ;; Read the device name
+    (format t "Read GAP Device Name: ~A~%"
+            (bytes->string
+              (read-gap-name hci handle gattc-table)))
 
     ;; Disconnect
     (format t "Disconnecting from handle ~A~%" handle)
