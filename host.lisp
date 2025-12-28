@@ -1462,65 +1462,66 @@
         (return-from process-rx nil))
       (format t "RXQ: ~A~%" packet))))
 
-(with-hci hci *h2c-path* *c2h-path*
-  (format t "================ enter ===============~%")
-  (hci-reset hci)
-  (hci-read-buffer-size hci)
-  (hci-allow-all-the-events hci)
-  (hci-set-random-address hci #xC1234567890A)
+(time
+ (with-hci hci *h2c-path* *c2h-path*
+   (format t "================ enter ===============~%")
+   (hci-reset hci)
+   (hci-read-buffer-size hci)
+   (hci-allow-all-the-events hci)
+   (hci-set-random-address hci #xC1234567890A)
 
-  (hci-set-scan-param hci)
-  (hci-set-scan-enable hci t)
+   (hci-set-scan-param hci)
+   (hci-set-scan-enable hci t)
 
-  (format t "RX ~A~%" (receive hci))
+   (format t "RX ~A~%" (receive hci))
 
-  (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
-        (handle)
-        (gattc-table))
-    ;; Stop scanning
-    (hci-set-scan-enable hci nil)
+   (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
+         (handle)
+         (gattc-table))
+     ;; Stop scanning
+     (hci-set-scan-enable hci nil)
 
-    ;; Initiate the connection
-    (format t "Connecting to peer ~A~%" address)
-    (hci-create-connection hci address)
+     ;; Initiate the connection
+     (format t "Connecting to peer ~A~%" address)
+     (hci-create-connection hci address)
 
-    ;; Wait for the connection event
-    (setf handle (wait-for-conn hci))
+     ;; Wait for the connection event
+     (setf handle (wait-for-conn hci))
 
-    ;; Pop channel selection evt
-    (format t "RX ~A~%" (receive hci))
+     ;; Pop channel selection evt
+     (format t "RX ~A~%" (receive hci))
 
-    ;; Upgrade MTU
-    (format t "Upgrading MTU..~%")
-    (format t "Negotiated MTU ~A~%" (att-set-mtu hci handle 255))
-    ;; Wait for NCP belonging to ATT REQ
-    (format t "NCP: ~A~%" (wait-for-ncp hci handle))
+     ;; Upgrade MTU
+     (format t "Upgrading MTU..~%")
+     (format t "Negotiated MTU ~A~%" (att-set-mtu hci handle 255))
+     ;; Wait for NCP belonging to ATT REQ
+     (format t "NCP: ~A~%" (wait-for-ncp hci handle))
 
-    ;; Wait a bit
-    (sleep .5)
+     ;; Wait a bit
+     ;; (sleep .5)
 
-    ;; Grug read GATT
-    (format t "FI ~X~%" (att-find-information hci handle))
+     ;; Grug read GATT
+     (format t "FI ~X~%" (att-find-information hci handle))
 
-    ;; Me, an intellectual:
-    (setf gattc-table (gattc-discover hci handle))
-    (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
-    (setf *test* gattc-table)
+     ;; Me, an intellectual:
+     (setf gattc-table (gattc-discover hci handle))
+     (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
+     (setf *test* gattc-table)
 
-    ;; Read the device name
-    (format t "Read GAP Device Name: ~A~%"
-            (bytes->string
+     ;; Read the device name
+     (format t "Read GAP Device Name: ~A~%"
+             (from-c-string
               (read-gap-name hci handle gattc-table)))
 
-    ;; Disconnect
-    (format t "Disconnecting from handle ~A~%" handle)
-    (hci-disconnect hci handle)
-    (wait-for-disconn hci)
+     ;; Disconnect
+     (format t "Disconnecting from handle ~A~%" handle)
+     (hci-disconnect hci handle)
+     (wait-for-disconn hci)
 
-    ;; Process ignored packets
-    (process-rx hci)
-    )
+     ;; Process ignored packets
+     (process-rx hci)
+     )
 
-  ;; (format t "HCI: ~X~%" hci)
-  (format t "================ exit ===============~%")
-  )
+   ;; (format t "HCI: ~X~%" hci)
+   (format t "================ exit ===============~%")
+   ))
