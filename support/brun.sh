@@ -15,7 +15,7 @@ mkfifo ${uart_c2h}
 # We don't want to execute if we have a build error
 set -eu
 
-this_dir=$(west topdir)/lhost/python-demo
+this_dir=$(west topdir)/lhost/support
 
 # Build controller image
 pushd ${this_dir}/firmware/hci_sim
@@ -23,7 +23,7 @@ west build -b nrf52_bsim
 popd
 
 # Build scanner image
-pushd ${this_dir}/firmware/observer
+pushd ${this_dir}/firmware/peripheral
 west build -b nrf52_bsim
 popd
 
@@ -38,8 +38,8 @@ $hci_uart \
     -fifo_0_tx=${uart_c2h} &
 
 # Start scanner
-observer="${this_dir}/firmware/observer/build/zephyr/zephyr.exe"
-$observer -s=python-id -d=2 -RealEncryption=0 -rs=70 &
+peripheral="${this_dir}/firmware/peripheral/build/zephyr/zephyr.exe"
+$peripheral -s=python-id -d=2 -RealEncryption=0 -rs=70 &
 
 # Force sim to (kinda) real-time
 pushd "${BSIM_COMPONENTS_PATH}/device_handbrake"

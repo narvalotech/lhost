@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 build:
-  kconfig: Kconfig
-  cmake: .
+  kconfig: support/Kconfig
+  cmake: ./support
   settings:
-    dts_root: .
+    dts_root: ./support

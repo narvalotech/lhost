@@ -13,8 +13,8 @@ mkfifo ${uart_c2h}
 # We don't want to execute if we have a build error
 set -eu
 
-this_dir=$(west topdir)/lhost/python-demo
-central="${this_dir}/firmware/observer/build/zephyr/zephyr.exe"
+this_dir=$(west topdir)/lhost/support
+central="${this_dir}/firmware/peripheral/build/zephyr/zephyr.exe"
 
 # Cleanup all existing sims
 ${BSIM_COMPONENTS_PATH}/common/stop_bsim.sh

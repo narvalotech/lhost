@@ -7,13 +7,30 @@ It's really broken, please don't use it.
 
 For now, it talks to a virtualized controller that uses the [Babblesim](https://babblesim.github.io/#content) simulator.
 
-Communication with the controller device is via a Zephyr UART driver that goes
-over unix pipes. 
-The driver is in this repo, under `drivers`, but should be upstreamed soon.
-
 ## Why???
 
 - I like image-based development
 - I want to quickly experiment ideas for [my day job](https://github.com/jori-nordic)
 - Dead languages don't have painful updates
 - I want a job at google, they seem to love rewriting BT hosts
+
+## How to run
+
+- Open vscode in the repo root
+- Trigger "open in container" (usually a popup)
+- In a new vscode terminal: `./support/brun.sh`
+- Eval `host.lisp` in emacs
+- Check the REPL for output
+
+## How it works
+
+- Babblesim runs fully inside the container
+- Bsim has two devices:
+  - a peripheral
+  - a controller with a home-rolled UNIX FIFO uart driver
+- `/tmp` is mounted in the container, the fifo is created there
+- `host.lisp` connects to that FIFO and talks HCI-H4 protocol
+
+## How about a real device
+
+Who needs real devices when you got bsim 😁

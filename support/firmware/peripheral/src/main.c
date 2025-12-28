@@ -84,19 +84,6 @@ static struct bt_conn_auth_cb auth_cb_display = {
 	.cancel = auth_cancel,
 };
 
-static void bas_notify(void)
-{
-	uint8_t battery_level = bt_bas_get_battery_level();
-
-	battery_level--;
-
-	if (!battery_level) {
-		battery_level = 100U;
-	}
-
-	bt_bas_set_battery_level(battery_level);
-}
-
 static void hrs_notify(void)
 {
 	static uint8_t heartrate = 90U;
@@ -149,7 +136,7 @@ int main(void)
 			/* Connected callback executed */
 
 		} else if (atomic_test_and_clear_bit(state, STATE_DISCONNECTED)) {
-			
+
 		}
 	}
 

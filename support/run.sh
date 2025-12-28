@@ -15,7 +15,7 @@ mkfifo ${uart_c2h}
 # We don't want to execute if we have a build error
 set -eu
 
-this_dir=$(west topdir)/lhost/python-demo
+this_dir=$(west topdir)/lhost/support
 
 # Cleanup all existing sims
 ${BSIM_COMPONENTS_PATH}/common/stop_bsim.sh
@@ -28,8 +28,8 @@ $hci_uart \
     -fifo_0_tx=${uart_c2h} >hci_uart.log &
 
 # Start scanner
-observer="${this_dir}/firmware/observer/build/zephyr/zephyr.exe"
-$observer -s=python-id -d=2 -RealEncryption=0 -rs=70 &
+peripheral="${this_dir}/firmware/peripheral/build/zephyr/zephyr.exe"
+$peripheral -s=python-id -d=2 -RealEncryption=0 -rs=70 &
 
 # Force sim to (kinda) real-time
 pushd "${BSIM_COMPONENTS_PATH}/device_handbrake"

@@ -49,7 +49,7 @@
             "label": "Debug gatt-bug simulation",
             "type": "shell",
             "command": "bash",
-            "args": ["-c", "nohup ${workspaceFolder}/python-demo/debug.sh > sim.log"],
+            "args": ["-c", "nohup ${workspaceFolder}/support/debug.sh > sim.log"],
             "group": {
                 "kind": "build"
             },
