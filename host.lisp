@@ -1136,8 +1136,8 @@
 ;; - [x] error pdu
 ;; - [x] find-information
 ;; - [x] discovery
-;; - [-] read/write
-;; - [] subscribe (CCCD)
+;; - [x] read/write
+;; - [-] subscribe (CCCD)
 ;;
 ;; GATT Server
 ;; - [] error pdu
@@ -1454,6 +1454,43 @@
     (when handle
       (att-read hci conn handle))))
 
+(defun att-write (hci conn handle value)
+  ;; TODO: MTU checks, yada yada
+  (format t "WRITING ~X~%" handle)
+  (att-send hci conn
+            (att-make-packet :write-req
+                             (append
+                              (make-c-int :u16 handle)
+                              value)))
+  (let* ((rsp (att-receive hci conn :write-rsp))
+         (data (getf rsp :data)))
+    (when rsp
+      (if (att-error? (pull-int data :u8))
+          (format t "ATT-WRITE-REQ ERROR: ~X~%" data)
+          data))))
+
+(defun gattc-find-cccd-handle (table uuid value-handle)
+  "Find the characteristic value handle of UUID"
+  (getf
+   (find-if
+    (lambda (a) (and
+                 (> (getf a :handle) value-handle)
+                 (eql :characteristic-descriptor (getf a :type))
+                 (eql uuid (getf a :uuid))))
+    table)
+   :handle))
+
+(defconstant +gatt-cccd-mask-notification+ #x0001)
+
+(defun gattc-subscribe (hci conn table value-uuid)
+  (let ((cccd-handle (gattc-find-cccd-handle
+                      table
+                      +gatt-uuid-cccd+
+                      (gattc-find-handle table value-uuid))))
+    (unless cccd-handle (break))
+    (att-write hci conn cccd-handle
+               (make-c-int :u16 +gatt-cccd-mask-notification+))))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -1512,6 +1549,16 @@
      (format t "Read GAP Device Name: ~A~%"
              (from-c-string
               (read-gap-name hci handle gattc-table)))
+
+     ;; Subscribe to HR
+     (gattc-subscribe
+      hci
+      handle
+      gattc-table
+      +gatt-uuid-heart-rate-measurement+)
+
+     ;; Wait for an HR notification
+     (sleep .5)                         ; teebeedee
 
      ;; Disconnect
      (format t "Disconnecting from handle ~A~%" handle)
