@@ -10,9 +10,9 @@ For now, it talks to a virtualized controller that uses the [Babblesim](https://
 ## Why???
 
 - I like image-based development
-- I want to quickly experiment ideas for [my day job](https://github.com/jori-nordic)
 - Dead languages don't have painful updates
-- I want a job at google, they seem to love rewriting BT hosts
+- I wanted to quickly experiment ideas for [my old job](https://github.com/jori-nordic)
+- I now want custom tooling for [my current job](https://www.garmin.com/en-CA/)
 
 ## How to run
 
