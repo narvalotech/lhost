@@ -1,0 +1,17 @@
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+#
+config UART_POSIX_PIPE
+	bool "UART driver for interacting with named POSIX pipes"
+	default y
+	depends on DT_HAS_ZEPHYR_POSIX_PIPE_UART_ENABLED
+	select TIMER if UART_ASYNC_API
+	select TIMER if UART_INTERRUPT_DRIVEN
+	select SERIAL_HAS_DRIVER
+	select SERIAL_SUPPORT_ASYNC
+	select SERIAL_SUPPORT_INTERRUPT
+
+config UART_POSIX_PIPE_RETRY_MS
+	int "Retry delay in milliseconds"
+	default 1
+	depends on UART_POSIX_PIPE
