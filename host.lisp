@@ -55,12 +55,18 @@
 (make-c-int :u32 8000)
  ; => (64 31 0 0)
 
-(defun decode-c-int (bytes)
-  (let ((result 0))
-    (dolist (byte (reverse bytes) result) ; Reverse the byte order for little endian
+(defun decode-c-int (bytes &optional type)
+  (let ((result 0)
+        (data (if type
+                  (subseq bytes 0 (u2b type))
+                  bytes)))
+    (dolist (byte (reverse data) result) ; Reverse the byte order for little endian
       (setf result (logior (ash result 8) byte)))))
 
-(decode-c-int '(1 2))
+(decode-c-int '(1 2 3 4))
+ ; => 67305985 (27 bits, #x4030201)
+(decode-c-int '(1 2 3 4) :u16)
+ ; => 513 (10 bits, #x201)
 
 (defun make-c-struct-member (member)
   ;; name is first el, unused here
@@ -1498,8 +1504,12 @@
               conn-handle)
          (eql (getf (cadr p) :channel)
               +l2cap-att-chan+)
-         (eql (car (getf (cadr p) :data)) (att-make-opcode :handle-value-ntf t))
-         (eql (decode-c-int (subseq (getf (cadr p) :data) 1 3)) gatt-handle))))
+         ;; Don't really need to "decode" since it's only one byte
+         (eql (decode-c-int (getf (cadr p) :data) :u8)
+              (att-make-opcode :handle-value-ntf t))
+         ;; This is two bytes tho
+         (eql (decode-c-int (subseq (getf (cadr p) :data) 1 3))
+              gatt-handle))))
 
 (defun wait-for-notification (hci conn gatt-handle)
   (let ((att-packet
