@@ -1137,7 +1137,7 @@
 ;; - [x] find-information
 ;; - [x] discovery
 ;; - [x] read/write
-;; - [-] subscribe (CCCD)
+;; - [x] subscribe (CCCD)
 ;;
 ;; GATT Server
 ;; - [] error pdu
@@ -1491,6 +1491,34 @@
     (att-write hci conn cccd-handle
                (make-c-int :u16 +gatt-cccd-mask-notification+))))
 
+(defun nfy? (conn-handle gatt-handle)
+  (lambda (p)
+    (and (eql (car p) :acl)
+         (eql (getf (cadr p) :conn-handle)
+              conn-handle)
+         (eql (getf (cadr p) :channel)
+              +l2cap-att-chan+)
+         (eql (car (getf (cadr p) :data)) (att-make-opcode :handle-value-ntf t))
+         (eql (decode-c-int (subseq (getf (cadr p) :data) 1 3)) gatt-handle))))
+
+(defun wait-for-notification (hci conn gatt-handle)
+  (let ((att-packet
+          (getf (receive-if hci (nfy? conn gatt-handle)) :data)))
+    (pull-int att-packet :u8)           ; opcode
+    (pull-int att-packet :u16)          ; handle
+    att-packet))
+
+(defun wait-for-heartrate (hci conn gattc-table)
+  (let* ((value-handle (gattc-find-handle
+                        gattc-table
+                        +gatt-uuid-heart-rate-measurement+))
+         (data (wait-for-notification
+                hci conn
+                value-handle))
+         (flags (pull-int data :u8))
+         (heartrate (pull-int data (if (logbitp 0 flags) :u16 :u8))))
+    heartrate))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -1534,13 +1562,7 @@
      ;; Wait for NCP belonging to ATT REQ
      (format t "NCP: ~A~%" (wait-for-ncp hci handle))
 
-     ;; Wait a bit
-     ;; (sleep .5)
-
-     ;; Grug read GATT
-     (format t "FI ~X~%" (att-find-information hci handle))
-
-     ;; Me, an intellectual:
+     ;; Discover GATT
      (setf gattc-table (gattc-discover hci handle))
      (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
      (setf *test* gattc-table)
@@ -1557,8 +1579,10 @@
       gattc-table
       +gatt-uuid-heart-rate-measurement+)
 
-     ;; Wait for an HR notification
-     (sleep .5)                         ; teebeedee
+     ;; Wait for some HR notifications
+     (loop for i from 0 to 5 do
+     (format t "Heart rate: ~A BPM~%"
+             (wait-for-heartrate hci handle gattc-table)))
 
      ;; Disconnect
      (format t "Disconnecting from handle ~A~%" handle)
