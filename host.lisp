@@ -1723,42 +1723,42 @@
      (hci-create-connection hci address)
 
      ;; Wait for the connection event
-     (setf handle (wait-for-conn hci))
+     (setf conn-handle (wait-for-conn hci))
 
      ;; Pop channel selection evt
      (format t "RX ~A~%" (receive hci))
 
      ;; Upgrade MTU
      (format t "Upgrading MTU..~%")
-     (format t "Negotiated MTU ~A~%" (att-set-mtu hci handle 255))
+     (format t "Negotiated MTU ~A~%" (att-set-mtu hci conn-handle 255))
      ;; Wait for NCP belonging to ATT REQ
-     (format t "NCP: ~A~%" (wait-for-ncp hci handle))
+     (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
 
      ;; Discover GATT
-     (setf gattc-table (gattc-discover hci handle))
+     (setf gattc-table (gattc-discover hci conn-handle))
      (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
      (setf *test* gattc-table)
 
      ;; Read the device name
      (format t "Read GAP Device Name: ~A~%"
              (from-c-string
-              (read-gap-name hci handle gattc-table)))
+              (read-gap-name hci conn-handle gattc-table)))
 
      ;; Subscribe to HR
      (gattc-subscribe
       hci
-      handle
+      conn-handle
       gattc-table
       +gatt-uuid-heart-rate-measurement+)
 
      ;; Wait for some HR notifications
      (loop for i from 0 to 5 do
      (format t "Heart rate: ~A BPM~%"
-             (wait-for-heartrate hci handle gattc-table)))
+             (wait-for-heartrate hci conn-handle gattc-table)))
 
      ;; Disconnect
-     (format t "Disconnecting from handle ~A~%" handle)
-     (hci-disconnect hci handle)
+     (format t "Disconnecting from conn-handle ~A~%" conn-handle)
+     (hci-disconnect hci conn-handle)
      (wait-for-disconn hci)
 
      ;; Process ignored packets
