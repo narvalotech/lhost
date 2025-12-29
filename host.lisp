@@ -1215,6 +1215,7 @@
 (defconstant +gatt-uuid-primary-service+ #x2800)
 (defconstant +gatt-uuid-characteristic+ #x2803)
 (defconstant +gatt-uuid-cccd+ #x2902)
+(defconstant +gatt-uuid-heart-rate-service+ #x180D)
 (defconstant +gatt-uuid-heart-rate-measurement+ #x2A37)
 (defconstant +gatt-uuid-gap-device-name+ #x2A00)
 
@@ -1254,6 +1255,7 @@
                   :handle (getf el :handle)
                   :type :service
                   :end-handle   (getf el :end-handle)
+                  ;; TODO: 128-bit
                   :uuid  (decode-c-int (getf el :value))))
                rsp))))))
 
@@ -1528,6 +1530,162 @@
          (flags (pull-int data :u8))
          (heartrate (pull-int data (if (logbitp 0 flags) :u16 :u8))))
     heartrate))
+
+(defun gatts-make-attribute (type uuid closures &optional name)
+  "Make ATTributes"
+  (append
+   (list :type type
+         :uuid uuid
+         :read (getf closures :read)
+         :write (getf closures :write))
+   (when name
+     (list :name name))))
+
+(defun read-spy (handle)
+  (format t "GATTS-READ: handle ~X~%" handle))
+
+(defun write-spy (handle data)
+  (format t "GATTS-WRITE: handle ~X data ~X~%" handle data))
+
+(gatts-make-attribute
+ :characteristic-value
+ +gatt-uuid-heart-rate-measurement+
+ (list :read #'read-spy :write #'write-spy)
+ "My characteristic")
+ ; => (:TYPE :CHARACTERISTIC-VALUE :UUID 10807 :READ #<FUNCTION READ-SPY> :WRITE
+ ; #<FUNCTION WRITE-SPY> :NAME "My characteristic")
+
+(defun gatts-make-char-value (uuid closures &optional name)
+  (gatts-make-attribute
+   :characteristic-value
+   uuid
+   closures
+   name))
+
+(gatts-make-char-value +gatt-uuid-heart-rate-measurement+
+                       (list :read #'read-spy :write #'write-spy)
+                       "My characteristic value")
+ ; => (:TYPE :CHARACTERISTIC-VALUE :UUID 10807 :READ #<FUNCTION READ-SPY> :WRITE
+ ; #<FUNCTION WRITE-SPY> :NAME "My characteristic value")
+
+(defun gatts-make-char-decl (uuid properties &optional name)
+  ;; properties should be pre-encoded
+  (gatts-make-attribute
+   :characteristic-declaration
+   +gatt-uuid-characteristic+
+   ;; props are read-only
+   (list :read (lambda (h) (append
+                            (make-c-int :u8 properties)
+                            (make-c-int :u16 (1+ h))
+                            (if (listp uuid)
+                                uuid
+                                (make-c-int :u16 uuid)))))
+   name))
+
+(defconstant +gatt-characteristic-properties+
+  (list
+   :broadcast
+   :read
+   :write-no-rsp
+   :write
+   :notify
+   :indicate
+   :auth-signed-writes
+   :extended-props
+   ))
+
+(position :read +gatt-characteristic-properties+)
+ ; => 1 (1 bit, #x1, #o1, #b1)
+(position :notify +gatt-characteristic-properties+)
+ ; => 4 (3 bits, #x4, #o4, #b100)
+
+(defun make-props (props)
+  (reduce #'logior
+          (mapcar
+           (lambda (prop)
+             (ash 1
+                  (position prop +gatt-characteristic-properties+)))
+           props)))
+
+(make-props '(:read :write :notify))
+ ; => 26 (5 bits, #x1A, #o32, #b11010)
+
+(gatts-make-char-decl
+ +gatt-uuid-heart-rate-measurement+
+ (make-props '(:read :notify))
+ "Some useful note")
+ ; => (:TYPE :CHARACTERISTIC-DECLARATION :UUID 10243 :READ
+ ; #<FUNCTION (LAMBDA (H) :IN GATTS-MAKE-CHAR-DECL) {12060B05CB}> :WRITE NIL
+ ; :NAME "Some useful note")
+
+(defun gatts-make-cccd (closures)
+  (gatts-make-attribute
+   :characteristic-descriptor
+   +gatt-uuid-cccd+
+   closures
+   "CCCD"))
+
+(gatts-make-cccd (list :read #'read-spy :write #'write-spy))
+ ; => (:TYPE :CHARACTERISTIC-DESCRIPTOR :UUID 10498 :READ #<FUNCTION READ-SPY> :WRITE
+ ; #<FUNCTION WRITE-SPY> :NAME "CCCD")
+
+(defun gatts-make-service (uuid)
+  ;; [v5.4 p1474] services should be grouped by UUID size
+  ;; re-order chars by UUID size
+  (gatts-make-attribute
+   :service
+   +gatt-uuid-primary-service+
+   (list :read (lambda (h) (declare (ignore h))
+                 (if (listp uuid)
+                     uuid
+                     (make-c-int uuid :u16))))))
+
+(gatts-make-service +gatt-uuid-heart-rate-service+)
+ ; => (:TYPE :SERVICE :UUID 10240 :READ
+ ; #<FUNCTION (LAMBDA (H) :IN GATTS-MAKE-SERVICE) {1202E1847B}> :WRITE NIL)
+
+(defun read-props (attribute)
+  (when (eql (getf attribute :type) :characteristic-declaration)
+    (list :properties
+          (decode-c-int (funcall (getf attribute :read) 0) :u8))))
+
+(read-props
+ (gatts-make-char-decl
+  +gatt-uuid-heart-rate-measurement+
+  (make-props '(:read :notify))
+  "Some useful note"))
+ ; => (:PROPERTIES 18)
+
+(defun gatts-make-table (&rest attributes)
+  ;; Let's go with simple for now
+  (let ((handle 0))
+    (loop for att in attributes
+          collecting
+          (append (list :handle (incf handle))
+                  (read-props att)
+                  att))))
+
+(gattc-print
+ (gatts-make-table
+  (gatts-make-service +gatt-uuid-heart-rate-service+)
+  (gatts-make-char-decl +gatt-uuid-heart-rate-measurement+ (make-props '(:read :notify)))
+  (gatts-make-char-value +gatt-uuid-heart-rate-measurement+ (list :read #'read-spy))
+  (gatts-make-cccd (list :read #'read-spy :write #'write-spy))
+  ))
+;  => "
+; ...1 SERVICE 2800
+; ...2   CHARACTERISTIC (PROP 12) (UUID 2803)
+; ...3     VALUE
+; ...4     CCCD
+; "
+
+;; ;; TODO: make a convenience macro that looks like this
+;; (make-gatt
+;;  (+gatt-uuid-heart-rate-service+
+;;   (+gatt-uuid-heart-rate-measurement+
+;;    (list (:read #'read-spy))
+;;    '(:read :notify)))
+;;  )
 
 (defun process-rx (hci)
   ;; Just print the packets for now
