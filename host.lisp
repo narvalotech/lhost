@@ -1401,6 +1401,7 @@
 
 (defun gattc-print (table)
   (with-output-to-string (os)
+    (format os "~%")
     (loop for attribute in table do
       (case (getf attribute :type)
         (:service
@@ -1658,26 +1659,13 @@
 
 (defun gatts-make-table (&rest attributes)
   ;; Let's go with simple for now
+  ;; TODO: check uuid16 and uuid128 ordering
   (let ((handle 0))
     (loop for att in attributes
           collecting
           (append (list :handle (incf handle))
                   (read-props att)
                   att))))
-
-(gattc-print
- (gatts-make-table
-  (gatts-make-service +gatt-uuid-heart-rate-service+)
-  (gatts-make-char-decl +gatt-uuid-heart-rate-measurement+ (make-props '(:read :notify)))
-  (gatts-make-char-value +gatt-uuid-heart-rate-measurement+ (list :read #'read-spy))
-  (gatts-make-cccd (list :read #'read-spy :write #'write-spy))
-  ))
-;  => "
-; ...1 SERVICE 2800
-; ...2   CHARACTERISTIC (PROP 12) (UUID 2803)
-; ...3     VALUE
-; ...4     CCCD
-; "
 
 ;; ;; TODO: make a convenience macro that looks like this
 ;; (make-gatt
@@ -1686,6 +1674,22 @@
 ;;    (list (:read #'read-spy))
 ;;    '(:read :notify)))
 ;;  )
+
+(defparameter *gatts-table*
+  (gatts-make-table
+   (gatts-make-service +gatt-uuid-heart-rate-service+)
+   (gatts-make-char-decl +gatt-uuid-heart-rate-measurement+ (make-props '(:read :notify)))
+   (gatts-make-char-value +gatt-uuid-heart-rate-measurement+ (list :read #'read-spy))
+   (gatts-make-cccd (list :read #'read-spy :write #'write-spy))
+   ))
+
+(gattc-print *gatts-table*)
+;  => "
+; ...1 SERVICE 2800
+; ...2   CHARACTERISTIC (PROP 12) (UUID 2803)
+; ...3     VALUE
+; ...4     CCCD
+; "
 
 (defun process-rx (hci)
   ;; Just print the packets for now
