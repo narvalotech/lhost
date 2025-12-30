@@ -1061,6 +1061,24 @@
       (make-c-int :u8 (getf +att-opcodes+ op-name))
       (getf +att-opcodes+ op-name)))
 
+(defconstant +att-requests+
+  (mapcar (lambda (o) (att-make-opcode o t))
+          (list
+           :exchange-mtu-req
+           :find-information-req
+           :find-by-type-value-req
+           :read-by-type-req
+           :read-req
+           :read-blob-req
+           :read-multiple-req
+           :read-by-group-type-req
+           :write-req
+           :write-cmd
+           :prepare-write-req
+           :execute-write-req
+           :read-multiple-variable-req
+           :signed-write-cmd)))
+
 (defun att-make-packet (op param)
   ;; TODO: check param is MTU-1
   (append (att-make-opcode op) param))
@@ -1084,7 +1102,7 @@
 
 (defconstant +l2cap-att-chan+ #x0004)
 
-(defun att? (conn-handle opcode-value)
+(defun att? (conn-handle &optional opcode-value req)
   (lambda (p)
     ;; sample p: (ACL (CONN-HANDLE 0 LENGTH 3 CHANNEL 4 DATA (3 40 1)))
     (and (eql (car p) :acl)
@@ -1092,8 +1110,14 @@
               conn-handle)
          (eql (getf (cadr p) :channel)
               +l2cap-att-chan+)
-         (or (eql (car (getf (cadr p) :data)) (car opcode-value))
-             (eql (car (getf (cadr p) :data)) (att-make-opcode :error-rsp t))))))
+         (if opcode-value
+             (or (eql (car (getf (cadr p) :data)) (car opcode-value))
+                 (eql (car (getf (cadr p) :data)) (att-make-opcode :error-rsp t)))
+             t)
+         (if req
+             (member (car (getf (cadr p) :data))
+                     +att-requests+)
+             t))))
 
 (defun att-receive (hci conn-handle opcode)
   (receive-if hci (att? conn-handle (att-make-opcode opcode))))
@@ -1759,22 +1783,17 @@
         (att-error-rsp :find-by-type-value-req
                        0 :attribute-not-found))))
 
-(defun wait-for-service-discovery (hci conn)
-  (let* ((req (getf (att-receive hci conn :find-by-type-value-req) :data))
-         (op (pull-int req :u8))
-         (start (pull-int req :u16))
+(defun gatts-process-find-by-type-value (conn req)
+  (declare (ignore conn))
+  (let* ((start (pull-int req :u16))
          (end (pull-int req :u16))
          (type (pull-int req :u16))
          ;; TODO: 128b
          (uuid (pull-int req :u16)))
-    (declare (ignore op))               ; poor OP always ignored
-
-    (att-send
-     hci conn
-     (if (eql type +gatt-uuid-primary-service+)
-         (gatts-find-service-rsp *gatts-table* uuid start end)
-         (att-error-rsp
-          :find-by-type-value-req 0 :request-not-supported)))))
+    (if (eql type +gatt-uuid-primary-service+)
+        (gatts-find-service-rsp *gatts-table* uuid start end)
+        (att-error-rsp
+         :find-by-type-value-req 0 :request-not-supported))))
 
 (defun gatts-find-char-rsp (table search-start search-end)
   (let* ((handle
@@ -1795,20 +1814,16 @@
                        search-start :attribute-not-found))))
 
 
-(defun wait-for-characteristic-discovery (hci conn)
-  (let* ((req (getf (att-receive hci conn :read-by-type-req) :data))
-         (op (pull-int req :u8))
-         (start (pull-int req :u16))
+(defun gatts-process-read-by-type (conn req)
+  (declare (ignore conn))
+  (let* ((start (pull-int req :u16))
          (end (pull-int req :u16))
          (type (pull-int req :u16)))
-    (declare (ignore op))
     (format t "READ-BY-TYPE-REQ start ~X end ~X~%" start end)
-    (att-send
-     hci conn
-     (if (eql type +gatt-uuid-characteristic+)
-         (gatts-find-char-rsp *gatts-table* start end)
-         (att-error-rsp
-          :read-by-type-req 0 :request-not-supported)))))
+    (if (eql type +gatt-uuid-characteristic+)
+        (gatts-find-char-rsp *gatts-table* start end)
+        (att-error-rsp
+         :read-by-type-req 0 :request-not-supported))))
 
 (defun gatts-find-info-rsp (table start end)
   (let ((information-data
@@ -1835,38 +1850,45 @@
 (gatts-find-info-rsp *gatts-table* 6 #xFFFF)
  ; => (1 4 6 0 10)
 
-(defun wait-for-cccd-discovery (hci conn)
-  (let* ((req (getf (att-receive hci conn :find-information-req) :data))
-         (op (pull-int req :u8))
-         (start (pull-int req :u16))
+(defun gatts-process-find-information (conn req)
+  (declare (ignore conn))
+  (let* ((start (pull-int req :u16))
          (end (pull-int req :u16)))
-    (declare (ignore op))
-
     (format t "FIND-INFO-REQ start ~X end ~X~%" start end)
-    (att-send
-     hci conn
-     (gatts-find-info-rsp *gatts-table* start end))))
+    (gatts-find-info-rsp *gatts-table* start end)))
 
-(defun wait-for-cccd-write (hci conn)
-  (let* ((req (getf (att-receive hci conn :write-req) :data))
-         (op (pull-int req :u8))
-         (handle (pull-int req :u16)))
-    (declare (ignore op))
-
+(defun gatts-process-write (conn req)
+  (declare (ignore conn))
+  (let* ((handle (pull-int req :u16)))
     (format t "CCCD-WRITE-REQ handle ~X~%" handle)
     (funcall (getf (nth (- handle 1) *gatts-table*) :write) handle req)
+    (att-make-packet :write-rsp '())))
 
+;; Handling ATT server:
+;; - wait for ACL packet
+;;   - this can be swapped for a global "event"
+;;   - TX requests can be "event"
+;;   - even GUI updates
+;; - if ATT, dispatch ATT rsp
+
+(defun wait-for-att-request (hci conn)
+  ;; Wait for the next ATT request
+  (let* ((req (getf (receive-if hci (att? conn nil t)) :data))
+         (op (pull-int req :u8))
+         (op-name (plist-key +att-opcodes+ op)))
     (att-send
      hci conn
-     (att-make-packet :write-rsp '()))))
-
-;; FIXME: dispatch instead of expecting
-(defun wait-for-discovery-by-peer (hci conn)
-  (wait-for-service-discovery hci conn)
-  (wait-for-characteristic-discovery hci conn)
-  (wait-for-cccd-discovery hci conn)
-  (wait-for-cccd-write hci conn)
-  )
+     (case op-name
+      (:find-by-type-value-req
+       (gatts-process-find-by-type-value conn req))
+      (:read-by-type-req
+       (gatts-process-read-by-type conn req))
+      (:find-information-req
+       (gatts-process-find-information conn req))
+      (:write-req
+       (gatts-process-write conn req))
+      (t
+       (att-error-rsp op-name 0 :request-not-supported))))))
 
 (defun process-rx (hci)
   ;; Just print the packets for now
@@ -1890,7 +1912,7 @@
    (format t "RX ~A~%" (receive hci))
 
    (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
-         (handle)
+         (conn-handle)
          (gattc-table))
      ;; Stop scanning
      (hci-set-scan-enable hci nil)
@@ -1921,8 +1943,9 @@
              (from-c-string
               (read-gap-name hci conn-handle gattc-table)))
 
-     ;; Wait for discovery
-     (wait-for-discovery-by-peer hci conn-handle)
+     ;; 4-step discovery
+     (loop for i from 0 to 3 do
+       (wait-for-att-request hci conn-handle))
 
      ;; Peer logs are more readable this way
      (sleep .5)
