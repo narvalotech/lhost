@@ -19,12 +19,12 @@ indent_size = 8
 # C
 [*.{c,h}]
 indent_style = tab
-indent_size = 8
+indent_size = 4
 
 # C++
 [*.{cpp,hpp}]
 indent_style = tab
-indent_size = 8
+indent_size = 4
 
 # Linker Script
 [*.ld]

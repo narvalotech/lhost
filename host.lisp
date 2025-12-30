@@ -1421,16 +1421,33 @@
            (format os "~4,'.,X     CCCD~%"
                    (getf attribute :handle))))))))
 
-(defun gattc-find-handle (table uuid)
-  "Find the characteristic value handle of UUID"
+;; Mixing gatts and gattc.. you oughta know better jon
+(defun gatt-find-handle (table uuid &key
+                                      (type :characteristic-value)
+                                      (start 1)
+                                      (end #xFFFF))
+  (format t "GATT-FIND-HANDLE uuid ~X start ~X end ~X~%" uuid start end)
+  "Find a needle in a haystack"
   (getf
    (find-if
-    (lambda (a) (and
-                 (eql :characteristic-value (getf a :type))
-                 (eql uuid
-                      (getf a :uuid))))
-    table)
+    (lambda (a)
+      (and
+       (eql type (getf a :type))
+       (if uuid
+           (eql uuid
+                (if (eql type :service)
+                    ;; The service UUID is in the data itself
+                    (decode-c-int (funcall (getf a :read) 0) :u16)
+                    (getf a :uuid)))
+           t)))
+    table
+    :start (- (min (length table) start) 1)
+    :end (min (length table) end))
    :handle))
+
+(defun gattc-find-handle (table uuid)
+  "Find the characteristic value handle of UUID"
+  (gatt-find-handle table uuid))
 
 (defun att-read (hci conn handle)
   (format t "READING ~X~%" handle)
@@ -1639,11 +1656,23 @@
    (list :read (lambda (h) (declare (ignore h))
                  (if (listp uuid)
                      uuid
-                     (make-c-int uuid :u16))))))
+                     (make-c-int :u16 uuid))))))
 
 (gatts-make-service +gatt-uuid-heart-rate-service+)
  ; => (:TYPE :SERVICE :UUID 10240 :READ
  ; #<FUNCTION (LAMBDA (H) :IN GATTS-MAKE-SERVICE) {1202E1847B}> :WRITE NIL)
+
+(defun read-value-uuid (attribute)
+  (when (eql (getf attribute :type) :characteristic-declaration)
+    (decode-c-int
+     (subseq (funcall (getf attribute :read) 0) 3) :u16)))
+
+(read-value-uuid
+ (gatts-make-char-decl
+  +gatt-uuid-heart-rate-measurement+
+  (make-props '(:read :notify))
+  "Some useful note"))
+ ; => 10807 (14 bits, #x2A37)
 
 (defun read-props (attribute)
   (when (eql (getf attribute :type) :characteristic-declaration)
@@ -1690,6 +1719,154 @@
 ; ...3     VALUE
 ; ...4     CCCD
 ; "
+
+(defun att-error-rsp (opcode handle code)
+  (att-make-packet :error-rsp
+                   (append
+                    (make-c-int :u8 (att-make-opcode opcode t))
+                    (make-c-int :u16 handle)
+                    (make-c-int :u8 (att-make-error code)))))
+
+(defun att-make-error (code)
+  (getf +att-errors+ code))
+
+(defun gatt-find-service (table uuid start end)
+  ;; Return one service at a time
+  (let* ((service-start
+           (gatt-find-handle
+            table uuid :type :service :start start :end end))
+         ;; Service ends where next service begins
+         (service-end
+           (when service-start
+             (gatt-find-handle
+              table nil :type :service :start (1+ service-start)))))
+    (when service-start
+      (list :start service-start
+            :end (if service-end (- service-end 1) #xFFFF)))))
+
+(gatt-find-service
+ *gatts-table* +gatt-uuid-heart-rate-service+ 1 #xFFFF)
+ ; => (:START 1 :END 65535)
+
+(defun gatts-find-service-rsp (table uuid search-start search-end)
+  (destructuring-bind (&key start end)
+      (gatt-find-service table uuid search-start search-end)
+    (if start
+        (att-make-packet :find-by-type-value-rsp
+                         (append
+                          (make-c-int :u16 start)
+                          (make-c-int :u16 end)))
+        (att-error-rsp :find-by-type-value-req
+                       0 :attribute-not-found))))
+
+(defun wait-for-service-discovery (hci conn)
+  (let* ((req (getf (att-receive hci conn :find-by-type-value-req) :data))
+         (op (pull-int req :u8))
+         (start (pull-int req :u16))
+         (end (pull-int req :u16))
+         (type (pull-int req :u16))
+         ;; TODO: 128b
+         (uuid (pull-int req :u16)))
+    (declare (ignore op))               ; poor OP always ignored
+
+    (att-send
+     hci conn
+     (if (eql type +gatt-uuid-primary-service+)
+         (gatts-find-service-rsp *gatts-table* uuid start end)
+         (att-error-rsp
+          :find-by-type-value-req 0 :request-not-supported)))))
+
+(defun gatts-find-char-rsp (table search-start search-end)
+  (let* ((handle
+           (gatt-find-handle table +gatt-uuid-characteristic+
+                             ;; type is a bit redundant here..
+                             :type :characteristic-declaration
+                             :start search-start :end search-end))
+         (read-fn (when handle
+                    (getf (nth (- handle 1) table) :read))))
+    (if handle
+        (att-make-packet :read-by-type-rsp
+                         (append
+                          ;; handle 2 service decl data 1+2+2
+                          (make-c-int :u8 (+ 2 5))
+                          (make-c-int :u16 handle)
+                          (funcall read-fn handle)))
+        (att-error-rsp :read-by-type-req
+                       search-start :attribute-not-found))))
+
+
+(defun wait-for-characteristic-discovery (hci conn)
+  (let* ((req (getf (att-receive hci conn :read-by-type-req) :data))
+         (op (pull-int req :u8))
+         (start (pull-int req :u16))
+         (end (pull-int req :u16))
+         (type (pull-int req :u16)))
+    (declare (ignore op))
+    (format t "READ-BY-TYPE-REQ start ~X end ~X~%" start end)
+    (att-send
+     hci conn
+     (if (eql type +gatt-uuid-characteristic+)
+         (gatts-find-char-rsp *gatts-table* start end)
+         (att-error-rsp
+          :read-by-type-req 0 :request-not-supported)))))
+
+(defun gatts-find-info-rsp (table start end)
+  (let ((information-data
+          (apply #'nconc
+                 (mapcar
+                  (lambda (a)
+                    (append (make-c-int :u16 (getf a :handle))
+                            (make-c-int :u16 (getf a :uuid))))
+                  (subseq table
+                          (- (min (length table) start) 1)
+                          (min (length table) end))))))
+    (if information-data
+        (att-make-packet :find-information-rsp
+                         (append
+                          (make-c-int :u8 #x01)
+                          information-data))
+        (att-error-rsp :find-information-req
+                       start :attribute-not-found))))
+
+(gatts-find-info-rsp *gatts-table* 4 #xFFFF)
+ ; => (5 1 4 0 2 41)
+(gatts-find-info-rsp *gatts-table* 1 #xFFFF)
+ ; => (5 1 1 0 0 40 2 0 3 40 3 0 55 42)
+(gatts-find-info-rsp *gatts-table* 6 #xFFFF)
+ ; => (1 4 6 0 10)
+
+(defun wait-for-cccd-discovery (hci conn)
+  (let* ((req (getf (att-receive hci conn :find-information-req) :data))
+         (op (pull-int req :u8))
+         (start (pull-int req :u16))
+         (end (pull-int req :u16)))
+    (declare (ignore op))
+
+    (format t "FIND-INFO-REQ start ~X end ~X~%" start end)
+    (att-send
+     hci conn
+     (gatts-find-info-rsp *gatts-table* start end))))
+
+(defun wait-for-cccd-write (hci conn)
+  (let* ((req (getf (att-receive hci conn :write-req) :data))
+         (op (pull-int req :u8))
+         (handle (pull-int req :u16)))
+    (declare (ignore op))
+
+    (format t "CCCD-WRITE-REQ handle ~X~%" handle)
+    (funcall (getf (nth (- handle 1) *gatts-table*) :write) handle req)
+
+    (att-send
+     hci conn
+     (att-make-packet :write-rsp '()))))
+
+;; FIXME: dispatch instead of expecting
+(defun wait-for-discovery-by-peer (hci conn)
+  (wait-for-service-discovery hci conn)
+  (wait-for-characteristic-discovery hci conn)
+  (wait-for-cccd-discovery hci conn)
+  (wait-for-cccd-write hci conn)
+  )
 
 (defun process-rx (hci)
   ;; Just print the packets for now
@@ -1743,6 +1920,12 @@
      (format t "Read GAP Device Name: ~A~%"
              (from-c-string
               (read-gap-name hci conn-handle gattc-table)))
+
+     ;; Wait for discovery
+     (wait-for-discovery-by-peer hci conn-handle)
+
+     ;; Peer logs are more readable this way
+     (sleep .5)
 
      ;; Subscribe to HR
      (gattc-subscribe
