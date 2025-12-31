@@ -1461,7 +1461,7 @@
            (eql uuid
                 (if (eql type :service)
                     ;; The service UUID is in the data itself
-                    (decode-c-int (funcall (getf a :read) 0) :u16)
+                    (decode-c-int (funcall (getf a :read) 0 0) :u16)
                     (getf a :uuid)))
            t)))
     table
@@ -1583,11 +1583,11 @@
    (when name
      (list :name name))))
 
-(defun read-spy (handle)
-  (format t "GATTS-READ: handle ~X~%" handle))
+(defun read-spy (conn handle)
+  (format t "GATTS-READ: conn ~X handle ~X~%" conn handle))
 
-(defun write-spy (handle data)
-  (format t "GATTS-WRITE: handle ~X data ~X~%" handle data))
+(defun write-spy (conn handle data)
+  (format t "GATTS-WRITE: conn ~X handle ~X data ~X~%" conn handle data))
 
 (gatts-make-attribute
  :characteristic-value
@@ -1616,12 +1616,14 @@
    :characteristic-declaration
    +gatt-uuid-characteristic+
    ;; props are read-only
-   (list :read (lambda (h) (append
-                            (make-c-int :u8 properties)
-                            (make-c-int :u16 (1+ h))
-                            (if (listp uuid)
-                                uuid
-                                (make-c-int :u16 uuid)))))
+   (list :read (lambda (c h)
+                 (declare (ignore c))
+                 (append
+                  (make-c-int :u8 properties)
+                  (make-c-int :u16 (1+ h))
+                  (if (listp uuid)
+                      uuid
+                      (make-c-int :u16 uuid)))))
    name))
 
 (defconstant +gatt-characteristic-properties+
@@ -1677,7 +1679,7 @@
   (gatts-make-attribute
    :service
    +gatt-uuid-primary-service+
-   (list :read (lambda (h) (declare (ignore h))
+   (list :read (lambda (c h) (declare (ignore c h))
                  (if (listp uuid)
                      uuid
                      (make-c-int :u16 uuid))))))
@@ -1689,7 +1691,7 @@
 (defun read-value-uuid (attribute)
   (when (eql (getf attribute :type) :characteristic-declaration)
     (decode-c-int
-     (subseq (funcall (getf attribute :read) 0) 3) :u16)))
+     (subseq (funcall (getf attribute :read) 0 0) 3) :u16)))
 
 (read-value-uuid
  (gatts-make-char-decl
@@ -1701,7 +1703,7 @@
 (defun read-props (attribute)
   (when (eql (getf attribute :type) :characteristic-declaration)
     (list :properties
-          (decode-c-int (funcall (getf attribute :read) 0) :u8))))
+          (decode-c-int (funcall (getf attribute :read) 0 0) :u8))))
 
 (read-props
  (gatts-make-char-decl
@@ -1728,13 +1730,42 @@
 ;;    '(:read :notify)))
 ;;  )
 
+(defparameter *active-conns* '())
+
+(defun get-address (conn)
+  (getf *active-conns* conn))
+
+;; cccd storage is just a plist (address . value)
+(defun make-cccd-storage ()
+  (let ((cccd-db))
+    (list
+
+     :read
+     (lambda (conn handle)
+       (declare (ignore handle))
+       (getf cccd-db (get-address conn)))
+
+     :write
+     (lambda (conn handle value)
+       (declare (ignore handle))
+       (setf (getf cccd-db (get-address conn)) value)))))
+
 (defparameter *gatts-table*
   (gatts-make-table
    (gatts-make-service +gatt-uuid-heart-rate-service+)
    (gatts-make-char-decl +gatt-uuid-heart-rate-measurement+ (make-props '(:read :notify)))
    (gatts-make-char-value +gatt-uuid-heart-rate-measurement+ (list :read #'read-spy))
-   (gatts-make-cccd (list :read #'read-spy :write #'write-spy))
+   (gatts-make-cccd (make-cccd-storage))
    ))
+
+(defun read-cccd (conn table value-handle)
+  (let ((cccd-handle
+          (gattc-find-cccd-handle table +gatt-uuid-cccd+ value-handle)))
+    (when cccd-handle
+      (funcall
+       (getf (nth (- cccd-handle 1) table) :read)
+       conn
+       cccd-handle))))
 
 (gattc-print *gatts-table*)
 ;  => "
@@ -1809,7 +1840,7 @@
                           ;; handle 2 service decl data 1+2+2
                           (make-c-int :u8 (+ 2 5))
                           (make-c-int :u16 handle)
-                          (funcall read-fn handle)))
+                          (funcall read-fn 0 handle)))
         (att-error-rsp :read-by-type-req
                        search-start :attribute-not-found))))
 
@@ -1858,10 +1889,9 @@
     (gatts-find-info-rsp *gatts-table* start end)))
 
 (defun gatts-process-write (conn req)
-  (declare (ignore conn))
   (let* ((handle (pull-int req :u16)))
     (format t "CCCD-WRITE-REQ handle ~X~%" handle)
-    (funcall (getf (nth (- handle 1) *gatts-table*) :write) handle req)
+    (funcall (getf (nth (- handle 1) *gatts-table*) :write) conn handle req)
     (att-make-packet :write-rsp '())))
 
 ;; Handling ATT server:
@@ -1913,16 +1943,21 @@
 
    (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
          (conn-handle)
-         (gattc-table))
+         (gattc-table)
+         ;; Shadow active-conns
+         (*active-conns* '()))
      ;; Stop scanning
      (hci-set-scan-enable hci nil)
 
      ;; Initiate the connection
      (format t "Connecting to peer ~A~%" address)
-     (hci-create-connection hci address)
+     ;; Some weird mangling happens if I don't copy, hmm..
+     (hci-create-connection hci (copy-tree address))
 
      ;; Wait for the connection event
      (setf conn-handle (wait-for-conn hci))
+     (setf (getf *active-conns* conn-handle)
+           (decode-c-int (getf address :address) :u32))
 
      ;; Pop channel selection evt
      (format t "RX ~A~%" (receive hci))
@@ -1943,9 +1978,16 @@
              (from-c-string
               (read-gap-name hci conn-handle gattc-table)))
 
+     (format t "Active conns: ~X~%" *active-conns*)
+     (format t "CCCD before: ~X~%"
+             (read-cccd conn-handle *gatts-table* 3))
+
      ;; 4-step discovery
      (loop for i from 0 to 3 do
        (wait-for-att-request hci conn-handle))
+
+     (format t "CCCD after: ~X~%"
+             (read-cccd conn-handle *gatts-table* 3))
 
      ;; Peer logs are more readable this way
      (sleep .5)
