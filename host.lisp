@@ -1170,10 +1170,10 @@
 ;; - [x] subscribe (CCCD)
 ;;
 ;; GATT Server
-;; - [] error pdu
-;; - [] find-information
-;; - [] read/write
-;; - [] notifications
+;; - [x] error pdu
+;; - [x] find-information
+;; - [-] read/write
+;; - [x] notifications
 ;;
 ;; SMP
 ;; - [] periph security request
