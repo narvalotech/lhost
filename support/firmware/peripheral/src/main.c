@@ -37,6 +37,18 @@ static uint8_t notify_func(struct bt_conn *conn,
 	}
 
 	printk("[NOTIFICATION] data %p length %u\n", data, length);
+	if (length == 2) {
+		struct hr {
+			uint8_t flags;
+			uint8_t hr;
+			/* we dont talk about the others.. */
+		};
+		const struct hr* rx = data;
+
+		if (rx->flags == 0x06) {
+			printk("Flags 0x%X HR %d bpm\n", rx->flags, rx->hr);
+		}
+	}
 
 	return BT_GATT_ITER_CONTINUE;
 }
