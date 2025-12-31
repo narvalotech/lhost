@@ -1191,6 +1191,9 @@
   (let ((128-bit (= 2 (pull-int data :u8))))
     (decode-handles-and-uuids data :128-bit 128-bit)))
 
+(defun att-error? (opcode)
+  (eql opcode (att-make-opcode :error-rsp t)))
+
 (defun att-find-information (hci conn-handle
                              &optional (start 1) (end #xFFFF))
   (unless (>= end start)
@@ -1216,9 +1219,6 @@
           (list :handle (pull-int data :u16)
                 :end-handle (pull-int data :u16)
                 :value (pull data el-len)))))
-
-(defun att-error? (opcode)
-  (eql opcode (att-make-opcode :error-rsp t)))
 
 (defun att-read-by-group-type (hci conn-handle uuid
                                &optional (start 1) (end #xFFFF))
@@ -1469,10 +1469,6 @@
     :end (min (length table) end))
    :handle))
 
-(defun gattc-find-handle (table uuid)
-  "Find the characteristic value handle of UUID"
-  (gatt-find-handle table uuid))
-
 (defun att-read (hci conn handle)
   (format t "READING ~X~%" handle)
   (att-send hci conn
@@ -1488,7 +1484,7 @@
 
 (defun find-gap-name-handle (table)
   ;; Search for the GAP name value attribute
-  (gattc-find-handle table +gatt-uuid-gap-device-name+))
+  (gatt-find-handle table +gatt-uuid-gap-device-name+))
 
 (defun read-gap-name (hci conn table)
   (let ((handle (find-gap-name-handle table)))
@@ -1497,7 +1493,7 @@
 
 (defun find-hr-handle (table)
   ;; Search for the HR value attribute
-  (gattc-find-handle table +gatt-uuid-heart-rate-measurement+))
+  (gatt-find-handle table +gatt-uuid-heart-rate-measurement+))
 
 (defun read-hr (hci conn table)
   (let ((handle (find-hr-handle table)))
@@ -1536,7 +1532,7 @@
   (let ((cccd-handle (gattc-find-cccd-handle
                       table
                       +gatt-uuid-cccd+
-                      (gattc-find-handle table value-uuid))))
+                      (gatt-find-handle table value-uuid))))
     (unless cccd-handle (break))
     (att-write hci conn cccd-handle
                (make-c-int :u16 +gatt-cccd-mask-notification+))))
@@ -1563,7 +1559,7 @@
     att-packet))
 
 (defun wait-for-heartrate (hci conn gattc-table)
-  (let* ((value-handle (gattc-find-handle
+  (let* ((value-handle (gatt-find-handle
                         gattc-table
                         +gatt-uuid-heart-rate-measurement+))
          (data (wait-for-notification
@@ -1775,15 +1771,15 @@
 ; ...4     CCCD
 ; "
 
+(defun att-make-error (code)
+  (getf +att-errors+ code))
+
 (defun att-error-rsp (opcode handle code)
   (att-make-packet :error-rsp
                    (append
                     (make-c-int :u8 (att-make-opcode opcode t))
                     (make-c-int :u16 handle)
                     (make-c-int :u8 (att-make-error code)))))
-
-(defun att-make-error (code)
-  (getf +att-errors+ code))
 
 (defun gatt-find-service (table uuid start end)
   ;; Return one service at a time
@@ -1966,7 +1962,7 @@
          ;; Shadow active-conns
          (*active-conns* '())
          (gatts-hr-handle
-           (gattc-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
+           (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
 
      ;; Stop scanning
      (hci-set-scan-enable hci nil)
