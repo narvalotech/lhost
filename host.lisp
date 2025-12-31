@@ -1920,6 +1920,25 @@
       (t
        (att-error-rsp op-name 0 :request-not-supported))))))
 
+(defun subbb? (conn table handle)
+  (let ((cccd
+          (read-cccd conn table handle)))
+    (when cccd
+      (= #x0001 (decode-c-int cccd)))))
+
+(defun notify (hci conn handle value)
+  (att-send hci conn
+            (att-make-packet
+             :handle-value-ntf
+             (append
+              (make-c-int :u16 handle)
+              value))))
+
+(defun encode-hr (bpm)
+  (append
+   (make-c-int :u8 #b110)
+   (make-c-int :u8 bpm)))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -1945,7 +1964,10 @@
          (conn-handle)
          (gattc-table)
          ;; Shadow active-conns
-         (*active-conns* '()))
+         (*active-conns* '())
+         (gatts-hr-handle
+           (gattc-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
+
      ;; Stop scanning
      (hci-set-scan-enable hci nil)
 
@@ -1980,7 +2002,7 @@
 
      (format t "Active conns: ~X~%" *active-conns*)
      (format t "CCCD before: ~X~%"
-             (read-cccd conn-handle *gatts-table* 3))
+             (read-cccd conn-handle *gatts-table* gatts-hr-handle))
 
      ;; 4-step discovery
      (loop for i from 0 to 3 do
@@ -1988,6 +2010,10 @@
 
      (format t "CCCD after: ~X~%"
              (read-cccd conn-handle *gatts-table* 3))
+
+     (when (subbb? conn-handle *gatts-table* gatts-hr-handle)
+       (notify hci conn-handle gatts-hr-handle (encode-hr 125))
+       (notify hci conn-handle gatts-hr-handle (encode-hr 95)))
 
      ;; Peer logs are more readable this way
      (sleep .5)
