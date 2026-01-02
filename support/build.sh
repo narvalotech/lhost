@@ -1,21 +1,34 @@
 #!/usr/bin/env bash
 
 # We don't want to execute if we have a build error
-set -eu
 
 this_dir=$(west topdir)/lhost/support
 
-# Build controller image
-pushd ${this_dir}/firmware/hci_sim
-west build -b nrf52_bsim
-popd
+image_name=$1
 
-# Build peripheral image
-pushd ${this_dir}/firmware/peripheral
-west build -b nrf52_bsim
-popd
+if [[ -n "$image_name" ]]; then
+    set -eu
 
-# Build central image
-pushd ${this_dir}/firmware/central
-west build -b nrf52_bsim
-popd
+    # Build specified image
+    pushd ${this_dir}/firmware/$image_name
+    west build -b nrf52_bsim
+    popd
+else
+    set -eu
+    # Build all images
+
+    # Build controller image
+    pushd ${this_dir}/firmware/hci_sim
+    west build -b nrf52_bsim
+    popd
+
+    # Build peripheral image
+    pushd ${this_dir}/firmware/peripheral
+    west build -b nrf52_bsim
+    popd
+
+    # Build central image
+    pushd ${this_dir}/firmware/central
+    west build -b nrf52_bsim
+    popd
+fi
