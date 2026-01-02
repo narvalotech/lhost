@@ -656,6 +656,18 @@
 (defparameter *h2c-path*   "/tmp/lhost/uart.h2c")
 (defparameter *c2h-path*   "/tmp/lhost/uart.c2h")
 
+;; To use on a real device
+;; socat -x /dev/ttyACM0,rawer,b115200 'GOPEN:/tmp/lhost/uart.h2c!!GOPEN:/tmp/lhost/uart.c2h'
+;;
+;; Build using devcontainer: https://github.com/narvalotech/zephyr/tree/devcontainer
+;; cd samples/bluetooth/hci_uart
+;; west build -b nrf52840dongle/nrf52840
+;;
+;; Use nrfdfu to flash:
+;; nix-shell -p cargo
+;; cargo install nrfdfu
+;; ~/.cargo/bin/nrfdfu samples/bluetooth/hci_uart/build/zephyr/zephyr.elf
+
 (defparameter sizes '(:acl-tx-size 0
                       :acl-rx-size 1))
 
@@ -962,17 +974,49 @@
 (make-ad-name "🎉")
  ; => (5 9 240 159 142 137)
 
+(defparameter *test-ad*
+  (append
+   (make-ad :flags '(#x01)) ; LE General discoverable
+   (make-ad-name "Bluey McBleface")))
+
+(defun parse-ad (input)
+  (let ((encoded (copy-tree input))
+        (len)
+        (type))
+    ;; LTV structure
+    (loop while encoded
+          nconc
+          (progn
+            (setf len (- (pull-int encoded :u8) 1))
+            (setf type (pull-int encoded :u8))
+            (list
+             (plist-key +ad-types+ type)
+             (pull encoded len))))))
+
+(parse-ad *test-ad*)
+ ; => (:FLAGS (1) :NAME-COMPLETE
+ ; (66 108 117 101 121 32 77 99 66 108 101 102 97 99 101))
+
+(search
+ "mcble"
+ (from-c-string
+  (getf (parse-ad *test-ad*) :name-complete))
+ :test #'equalp)
+ ; => 6 (3 bits, #x6, #o6, #b110)
+
 (defun evt? (evt-code)
   (lambda (packet)
     (eql (car (cadr packet)) evt-code)))
 
 (defun wait-for-scan-report (hci predicate)
   ;; TODO: handle multiple reports
-  (let ((evt (receive-if hci (evt? :le-scan-report))))
-    (let ((report (find-if predicate (getf (nth 1 evt) :reports))))
-      (when report
-        (list :type (getf report :address-type)
-              :address (getf report :address))))))
+  (loop
+    (let ((evt (receive-if hci (evt? :le-scan-report))))
+      (let ((report (find-if predicate (getf (nth 1 evt) :reports))))
+        (when report
+          (return-from wait-for-scan-report
+            (list :type (getf report :address-type)
+                  :address (getf report :address))))))))
 
 (defun wait-for-conn (hci)
   (let ((evt (receive-if hci (evt? :le-enh-conn-complete))))
@@ -1262,7 +1306,7 @@
   ;; Issue new reads until ATT-ERROR = not found (#x0A)
   (let ((rsp t)
         (start-handle #x0001))
-    (loop while rsp
+    (loop while (and rsp (< start-handle #xFFFF))
           nconcing
           (progn
             ;; TODO: better story for errors
@@ -1935,6 +1979,16 @@
    (make-c-int :u8 #b110)
    (make-c-int :u8 bpm)))
 
+(defun name? (name report)
+  ;; Sample report
+  (let* ((ad (getf (copy-tree report) :data))
+         (parsed (parse-ad ad))
+         (encoded-name (getf parsed :name-complete)))
+    (format t "search ~A in: ~A~%" name encoded-name)
+    (if encoded-name
+        (search name (from-c-string encoded-name) :test #'equalp)
+        nil)))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -1956,7 +2010,7 @@
 
    (format t "RX ~A~%" (receive hci))
 
-   (let ((address (wait-for-scan-report hci (lambda (x) (declare (ignore x)) t)))
+   (let ((address (wait-for-scan-report hci (lambda (x) (name? "rp8a" x))))
          (conn-handle)
          (gattc-table)
          ;; Shadow active-conns
@@ -1965,6 +2019,7 @@
            (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
 
      ;; Stop scanning
+     (unless address (break))
      (hci-set-scan-enable hci nil)
 
      ;; Initiate the connection
@@ -1984,7 +2039,7 @@
      (format t "Upgrading MTU..~%")
      (format t "Negotiated MTU ~A~%" (att-set-mtu hci conn-handle 255))
      ;; Wait for NCP belonging to ATT REQ
-     (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
+     ;; (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
 
      ;; Discover GATT
      (setf gattc-table (gattc-discover hci conn-handle))
