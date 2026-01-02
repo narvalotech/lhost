@@ -1615,7 +1615,7 @@
 
 (defun find-gap-name-handle (table)
   ;; Search for the GAP name value attribute
-  (gatt-find-handle table +gatt-uuid-gap-device-name+))
+  (gatt-find-handle table +gatt-uuid-gap-device-name+ :type :characteristic-value))
 
 (defun read-gap-name (hci conn table)
   (let ((handle (find-gap-name-handle table)))
@@ -1624,7 +1624,7 @@
 
 (defun find-hr-handle (table)
   ;; Search for the HR value attribute
-  (gatt-find-handle table +gatt-uuid-heart-rate-measurement+))
+  (gatt-find-handle table +gatt-uuid-heart-rate-measurement+ :type :characteristic-value))
 
 (defun read-hr (hci conn table)
   (let ((handle (find-hr-handle table)))
@@ -1692,7 +1692,8 @@
 (defun wait-for-heartrate (hci conn gattc-table)
   (let* ((value-handle (gatt-find-handle
                         gattc-table
-                        +gatt-uuid-heart-rate-measurement+))
+                        +gatt-uuid-heart-rate-measurement+
+                        :type :characteristic-value))
          (data (wait-for-notification
                 hci conn
                 value-handle))
@@ -2115,6 +2116,8 @@
  (with-hci hci *h2c-path* *c2h-path*
    (hci-log-reset)
    (format t "================ enter ===============~%")
+   (format t "Our table: ~%~A~%" (gattc-print *gatts-table*))
+
    (hci-reset hci)
    (hci-read-buffer-size hci)
    (hci-allow-all-the-events hci)
@@ -2184,7 +2187,7 @@
        (wait-for-att-request hci conn-handle))
 
      (format t "CCCD after: ~X~%"
-             (read-cccd conn-handle *gatts-table* 3))
+             (read-cccd conn-handle *gatts-table* gatts-hr-handle))
 
      (when (subbb? conn-handle *gatts-table* gatts-hr-handle)
        (notify hci conn-handle gatts-hr-handle (encode-hr 125))
@@ -2200,6 +2203,7 @@
       gattc-table
       +gatt-uuid-heart-rate-measurement+)
 
+     (format t "Wait for HR~%")
      ;; Wait for some HR notifications
      (loop for i from 0 to 5 do
      (format t "Heart rate: ~A BPM~%"
