@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+peer_image_name="${1:-peripheral}"
+
 # It's ok if the FIFO already exists
 set +eu
 
@@ -27,9 +29,9 @@ $hci_uart \
     -fifo_0_rx=${uart_h2c} \
     -fifo_0_tx=${uart_c2h} >"$this_dir/hci_uart.log" &
 
-# Start peripheral
-peripheral="${this_dir}/firmware/peripheral/build/zephyr/zephyr.exe"
-$peripheral -s=lisp-id -d=2 -RealEncryption=0 -rs=70 &
+# Start peer (peripheral is default)
+peer_exe="${this_dir}/firmware/${peer_image_name}/build/zephyr/zephyr.exe"
+$peer_exe -s=lisp-id -d=2 -RealEncryption=0 -rs=70 &
 
 # Force sim to (kinda) real-time
 pushd "${BSIM_COMPONENTS_PATH}/device_handbrake"
