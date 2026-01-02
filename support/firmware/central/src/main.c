@@ -28,56 +28,34 @@ static void start_scan(void);
 static bool eir_found(struct bt_data *data, void *user_data)
 {
 	bt_addr_le_t *addr = user_data;
-	int i;
 
 	printk("[AD]: %u data_len %u\n", data->type, data->data_len);
 
-	switch (data->type) {
-	case BT_DATA_UUID16_SOME:
-	case BT_DATA_UUID16_ALL:
-		if (data->data_len % sizeof(uint16_t) != 0U) {
-			printk("AD malformed\n");
-			return true;
-		}
+	struct bt_conn_le_create_param *create_param;
+	struct bt_le_conn_param *param;
+	int err;
 
-		for (i = 0; i < data->data_len; i += sizeof(uint16_t)) {
-			struct bt_conn_le_create_param *create_param;
-			struct bt_le_conn_param *param;
-			const struct bt_uuid *uuid;
-			uint16_t u16;
-			int err;
-
-			memcpy(&u16, &data->data[i], sizeof(u16));
-			uuid = BT_UUID_DECLARE_16(sys_le16_to_cpu(u16));
-			/* if (bt_uuid_cmp(uuid, BT_UUID_HRS)) { */
-			/* 	continue; */
-			/* } */
-
-			err = bt_le_scan_stop();
-			if (err) {
-				printk("Stop LE scan failed (err %d)\n", err);
-				continue;
-			}
-
-			printk("Creating connection\n");
-			param = BT_LE_CONN_PARAM_DEFAULT;
-			create_param = BT_CONN_LE_CREATE_CONN;
-			err = bt_conn_le_create(addr, create_param,
-									param, &default_conn);
-			if (err) {
-				printk("Create connection failed (err %d)\n", err);
-				start_scan();
-			}
-
-			return false;
-		}
+	err = bt_le_scan_stop();
+	if (err) {
+		printk("Stop LE scan failed (err %d)\n", err);
+		return true;
 	}
 
-	return true;
+	printk("Creating connection\n");
+	param = BT_LE_CONN_PARAM_DEFAULT;
+	create_param = BT_CONN_LE_CREATE_CONN;
+	err = bt_conn_le_create(addr, create_param,
+							param, &default_conn);
+	if (err) {
+		printk("Create connection failed (err %d)\n", err);
+		start_scan();
+	}
+
+	return false;
 }
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
-			 struct net_buf_simple *ad)
+						 struct net_buf_simple *ad)
 {
 	char dev[BT_ADDR_LE_STR_LEN];
 

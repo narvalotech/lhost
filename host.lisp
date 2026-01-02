@@ -1098,7 +1098,10 @@
 
 (defun wait-for-conn (hci)
   (let ((evt (receive-if hci (evt? :le-enh-conn-complete))))
-    (getf (nth 1 evt) :handle)))
+    (list :handle
+          (getf (nth 1 evt) :handle)
+          :address
+          (getf (nth 1 evt) :peer-address))))
 
 (defun wait-for-disconn (hci)
   (let ((evt (receive-if hci (evt? :disconnection-complete))))
@@ -2123,12 +2126,14 @@
    (hci-allow-all-the-events hci)
    (hci-set-random-address hci #xC1234567890A)
 
-   (hci-set-scan-param hci)
-   (hci-set-scan-enable hci t)
+   (hci-set-adv-param hci)
+   (hci-set-adv-data hci
+                     (list
+                      (make-ad :flags '(#x01)) ; LE General discoverable
+                      (make-ad-name "lhost")))
+   (hci-set-adv-enable t hci)
 
-   (format t "RX ~A~%" (receive hci))
-
-   (let ((address (wait-for-scan-report hci (lambda (x) (name? "hello" x))))
+   (let ((conn-evt)
          (conn-handle)
          (gattc-table)
          ;; Shadow active-conns
@@ -2136,22 +2141,11 @@
          (gatts-hr-handle
            (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
 
-     ;; Stop scanning
-     (unless address (break))
-     (hci-set-scan-enable hci nil)
-
-     ;; Initiate the connection
-     (format t "Connecting to peer ~A~%" address)
-     ;; Some weird mangling happens if I don't copy, hmm..
-     (hci-create-connection hci (copy-tree address))
-
      ;; Wait for the connection event
-     (setf conn-handle (wait-for-conn hci))
+     (setf conn-evt (wait-for-conn hci))
+     (setf conn-handle (getf conn-evt :handle))
      (setf (getf *active-conns* conn-handle)
-           (decode-c-int (getf address :address) :u32))
-
-     ;; Pop channel selection evt
-     (format t "RX ~A~%" (receive hci))
+           (decode-c-int (getf conn-evt :address) :u32))
 
      ;; Upgrade MTU
      (format t "Upgrading MTU..~%")
@@ -2170,35 +2164,10 @@
               (read-gap-name hci conn-handle gattc-table)))
 
      (format t "Active conns: ~X~%" *active-conns*)
-     (format t "CCCD before: ~X~%"
-             (read-cccd conn-handle *gatts-table* gatts-hr-handle))
 
-     ;; 4-step discovery
-     (loop for i from 0 to 3 do
-       (wait-for-att-request hci conn-handle))
+     ;; TODO: Wait for security
 
-     (format t "CCCD after: ~X~%"
-             (read-cccd conn-handle *gatts-table* gatts-hr-handle))
-
-     (when (subbb? conn-handle *gatts-table* gatts-hr-handle)
-       (notify hci conn-handle gatts-hr-handle (encode-hr 125))
-       (notify hci conn-handle gatts-hr-handle (encode-hr 95)))
-
-     ;; Peer logs are more readable this way
      (sleep .5)
-
-     ;; Subscribe to HR
-     (gattc-subscribe
-      hci
-      conn-handle
-      gattc-table
-      +gatt-uuid-heart-rate-measurement+)
-
-     (format t "Wait for HR~%")
-     ;; Wait for some HR notifications
-     (loop for i from 0 to 5 do
-     (format t "Heart rate: ~A BPM~%"
-             (wait-for-heartrate hci conn-handle gattc-table)))
 
      ;; Disconnect
      (format t "Disconnecting from conn-handle ~A~%" conn-handle)
