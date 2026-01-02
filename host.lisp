@@ -1297,6 +1297,12 @@
 ;; - [-] read/write
 ;; - [x] notifications
 ;;
+;; Android device
+;; - [] read-by-type on device name (#x2a00)
+;; - [] read-by-type on db hash (#x2b2a)
+;; - [] read-by-type on appearance (#x2a01)
+;; - [x] read-by-group-type on primary-svc (#x2800)
+;;
 ;; SMP
 ;; - [] periph security request
 ;; - [] JustWorks pairing
@@ -1569,16 +1575,19 @@
 
 ;; Mixing gatts and gattc.. you oughta know better jon
 (defun gatt-find-handle (table uuid &key
-                                      (type :characteristic-value)
+                                      (type nil)
                                       (start 1)
                                       (end #xFFFF))
-  (format t "GATT-FIND-HANDLE uuid ~X start ~X end ~X~%" uuid start end)
+  (format t "GATT-FIND-HANDLE uuid ~X start ~X end ~X ~A~%" uuid start end type)
   "Find a needle in a haystack"
   (getf
    (find-if
     (lambda (a)
       (and
-       (eql type (getf a :type))
+       t
+       (if type
+           (eql type (getf a :type))
+           t)
        (if uuid
            (eql uuid
                 (if (eql type :service)
@@ -1944,24 +1953,25 @@
         (att-error-rsp
          :find-by-type-value-req 0 :request-not-supported))))
 
-(defun gatts-find-char-rsp (table search-start search-end)
+(defun gatts-find-char-rsp (table uuid search-start search-end)
   (let* ((handle
-           (gatt-find-handle table +gatt-uuid-characteristic+
+           (gatt-find-handle table uuid
                              ;; type is a bit redundant here..
                              :type :characteristic-declaration
-                             :start search-start :end search-end))
-         (read-fn (when handle
-                    (getf (nth (- handle 1) table) :read))))
+                             :start search-start :end search-end)))
     (if handle
-        (att-make-packet :read-by-type-rsp
-                         (append
-                          ;; handle 2 service decl data 1+2+2
-                          (make-c-int :u8 (+ 2 5))
-                          (make-c-int :u16 handle)
-                          (funcall read-fn 0 handle)))
+        (let* ((read-fn
+                 (getf (nth (- handle 1) table) :read))
+               (data (funcall read-fn 0 handle)))
+          (when (> (length data) (- #xFF 2))
+            (error "aiight gotta implement this now"))
+          (att-make-packet :read-by-type-rsp
+                           (append
+                            (make-c-int :u8 (+ 2 (length data)))
+                            (make-c-int :u16 handle)
+                            data)))
         (att-error-rsp :read-by-type-req
                        search-start :attribute-not-found))))
-
 
 (defun gatts-process-read-by-type (conn req)
   (declare (ignore conn))
@@ -1969,21 +1979,45 @@
          (end (pull-int req :u16))
          (type (pull-int req :u16)))
     (format t "READ-BY-TYPE-REQ start ~X end ~X~%" start end)
-    (if (eql type +gatt-uuid-characteristic+)
-        (gatts-find-char-rsp *gatts-table* start end)
+    (gatts-find-char-rsp *gatts-table* type start end)))
+
+(defun gatts-read-by-group-type-rsp (table search-start search-end)
+  (destructuring-bind (&key start end)
+      (gatt-find-service table nil search-start search-end)
+    (if start
+        (let* ((read-fn (getf (nth (- start 1) table) :read))
+               (svc-uuid (decode-c-int (funcall read-fn 0 start))))
+          (att-make-packet :read-by-group-type-rsp
+                           (append
+                            (make-c-int :u8 (+ 2 2 2))
+                            (make-c-int :u16 start)
+                            (make-c-int :u16 end)
+                            (make-c-int :u16 svc-uuid))))
+        (att-error-rsp :read-by-group-type-req
+                       0 :attribute-not-found))))
+
+(defun gatts-process-read-by-group-type (conn req)
+  (declare (ignore conn))
+  (let* ((start (pull-int req :u16))
+         (end (pull-int req :u16))
+         (type (pull-int req :u16)))
+    (format t "READ-BY-GROUP-TYPE-REQ start ~X end ~X~%" start end)
+    (if (eql type +gatt-uuid-primary-service+)
+        (gatts-read-by-group-type-rsp *gatts-table* start end)
         (att-error-rsp
-         :read-by-type-req 0 :request-not-supported))))
+         :read-by-group-type-req 0 :request-not-supported))))
 
 (defun gatts-find-info-rsp (table start end)
   (let ((information-data
-          (apply #'nconc
-                 (mapcar
-                  (lambda (a)
-                    (append (make-c-int :u16 (getf a :handle))
-                            (make-c-int :u16 (getf a :uuid))))
-                  (subseq table
-                          (- (min (length table) start) 1)
-                          (min (length table) end))))))
+          (when (>= (length table) start)
+            (apply #'nconc
+                   (mapcar
+                    (lambda (a)
+                      (append (make-c-int :u16 (getf a :handle))
+                              (make-c-int :u16 (getf a :uuid))))
+                    (subseq table
+                            (- (min (length table) start) 1)
+                            (min (length table) end)))))))
     (if information-data
         (att-make-packet :find-information-rsp
                          (append
@@ -2035,6 +2069,8 @@
        (gatts-process-find-information conn req))
       (:write-req
        (gatts-process-write conn req))
+      (::read-by-group-type-req
+       (gatts-process-read-by-group-type conn req))
       (t
        (att-error-rsp op-name 0 :request-not-supported))))))
 
@@ -2114,7 +2150,11 @@
      ;; Let's try having the phone discover us first
      (format t "Listening for ATT..~%")
      (loop
-       (wait-for-att-request hci conn-handle))
+       (progn
+         (wait-for-att-request hci conn-handle)
+         (when (subbb? conn-handle *gatts-table* gatts-hr-handle)
+           (notify hci conn-handle gatts-hr-handle (encode-hr 125))
+           (notify hci conn-handle gatts-hr-handle (encode-hr 95)))))
 
      ;; Pop channel selection evt
      ;; (format t "RX ~A~%" (receive hci))

@@ -33,4 +33,4 @@ For now, it talks to a virtualized controller that uses the [Babblesim](https://
 
 ## How about a real device
 
-Who needs real devices when you got bsim 😁
+Able to be discovered by pixel 8.
