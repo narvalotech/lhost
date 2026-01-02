@@ -2128,7 +2128,7 @@
 
    (format t "RX ~A~%" (receive hci))
 
-   (let ((address (wait-for-scan-report hci (lambda (x) (name? "rp8a" x))))
+   (let ((address (wait-for-scan-report hci (lambda (x) (name? "hello" x))))
          (conn-handle)
          (gattc-table)
          ;; Shadow active-conns
@@ -2150,23 +2150,14 @@
      (setf (getf *active-conns* conn-handle)
            (decode-c-int (getf address :address) :u32))
 
-     ;; Let's try having the phone discover us first
-     (format t "Listening for ATT..~%")
-     (loop
-       (progn
-         (wait-for-att-request hci conn-handle)
-         (when (subbb? conn-handle *gatts-table* gatts-hr-handle)
-           (notify hci conn-handle gatts-hr-handle (encode-hr 125))
-           (notify hci conn-handle gatts-hr-handle (encode-hr 95)))))
-
      ;; Pop channel selection evt
-     ;; (format t "RX ~A~%" (receive hci))
+     (format t "RX ~A~%" (receive hci))
 
      ;; Upgrade MTU
      (format t "Upgrading MTU..~%")
      (format t "Negotiated MTU ~A~%" (att-set-mtu hci conn-handle 255))
      ;; Wait for NCP belonging to ATT REQ
-     ;; (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
+     (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
 
      ;; Discover GATT
      (setf gattc-table (gattc-discover hci conn-handle))
