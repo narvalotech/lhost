@@ -9,15 +9,23 @@
 (defun make-range (max)
   (loop for number from 0 to (- max 1) collect number))
 
+(defun make-be-range (max)
+  (loop for number from (- max 1) downto 0 collect number))
+
 (defun extract-byte (number index)
   (ldb (byte 8 (* index 8)) number))
 
-(defun make-uint (octets number)
-  (loop for pos in (make-range octets)
+(defun make-uint (octets number &optional big-endian)
+  (loop for pos in (if big-endian
+                       (make-be-range octets)
+                       (make-range octets))
         collect (extract-byte number pos)))
 
 (make-uint 4 8000)
  ; => (64 31 0 0)
+
+(make-uint 4 8000 t)
+ ; => (0 0 31 64)
 
 (defun u2b (type)
   (case type
@@ -47,13 +55,15 @@
 (type->octets :bt-addr)
  ; => 6 (3 bits, #x6, #o6, #b110)
 
-(defun make-c-int (type value)
-  (make-uint (type->octets type) value))
+(defun make-c-int (type value &optional big-endian)
+  (make-uint (type->octets type) value big-endian))
 
 (make-c-int :u8 #xFF)
  ; => (255)
 (make-c-int :u32 8000)
  ; => (64 31 0 0)
+(make-c-int :u32 8000 t)
+ ; => (0 0 31 64)
 
 (defun decode-c-int (bytes &optional type)
   (let ((result 0)
@@ -82,6 +92,58 @@
 ;; Eg. write default data length cmd. Len = 200 bytes, time = 1000 us
 (make-c-struct '(("tx-octets" :u16 200) ("tx-time-us" :u16 1000)))
  ; => (200 0 232 3)
+
+(defun char->utf8 (char)
+  "Converts a CL character to a UTF-8 (list of bytes)."
+  ;; Phind made this! 10 bucks well spent
+  ;; https://www.phind.com/search?cache=kohb0esnotediegmqr58rt1m
+  (let ((code (char-code char)))
+    (cond
+      ;; 1-byte sequence
+      ((<= code #x7F)
+       (list code))
+      ;; 2-byte sequence
+      ((<= code #x7FF)
+       (list (logior #xC0 (ash code -6))
+             (logior #x80 (logand code #x3F))))
+      ;; 3-byte sequence
+      ((<= code #xFFFF)
+       (list (logior #xE0 (ash code -12))
+             (logior #x80 (logand (ash code -6) #x3F))
+             (logior #x80 (logand code #x3F))))
+      ;; 4-byte sequence
+      ((<= code #x10FFFF)
+       (list (logior #xF0 (ash code -18))
+             (logior #x80 (logand (ash code -12) #x3F))
+             (logior #x80 (logand (ash code -6) #x3F))
+             (logior #x80 (logand code #x3F)))))))
+
+(char->utf8 #\a)
+ ; => (97)
+(char->utf8 #\λ)
+ ; => (206 187)
+(char->utf8 #\💻)
+ ; => (240 159 146 187)
+
+(defun to-c-string (cl-string &optional null-terminated)
+  "Converts a CL string to a list of bytes"
+  (append
+   (mapcan (lambda (c) (char->utf8 c)) (coerce cl-string 'list))
+   (if null-terminated (list 0) nil)))
+
+(to-c-string "test")
+ ; => (116 101 115 116)
+(to-c-string "test" t)
+ ; => (116 101 115 116 0)
+(to-c-string "🔵-🦷")
+ ; => (240 159 148 181 45 240 159 166 183)
+
+(defun from-c-string (bytes)
+  "Decode an ASCII-encoded string from a list of bytes"
+  ;; This one doesn't support UTF-8
+  (with-output-to-string (s)
+    (dolist (b bytes)
+      (write-char (code-char b) s))))
 
 ;;;;;;;;;;;;; babblesim PHY
 
@@ -476,11 +538,26 @@
 ;  => "(36 32 4 200 0 232 3)
 ; "
 
+(defparameter *hci-log* '())
+(defparameter *hci-log-start-time* (get-internal-real-time))
+
+(defun hci-log-reset ()
+  (setf *hci-log* '())
+  (setf *hci-log-start-time* (get-internal-real-time)))
+
+(defun hci-log (direction packet)
+  (push (list
+         :timestamp (- (get-internal-real-time) *hci-log-start-time*)
+         :direction direction
+         :packet packet)
+        *hci-log*))
+
 (defun send (hci type payload)
   "Format a payload into H4 and send to hci device"
   (let ((stream (getf hci :h2c))
         (packet (make-h4 type payload)))
     (format t "TX: ~x~%" packet)
+    (hci-log :h2c packet)
     (write-sequence packet stream)))
 
 (defun h4-parse-opcode (packet)
@@ -493,7 +570,7 @@
     (:evt 2)
     (:acl 4)
     (:iso 4)
-    (t (error "doesn't look like anything to me"))))
+    (t (error "unknown h4 packet type"))))
 
 (defun hci-header-len-field (opcode)
   "Returns the offset and the size of the length field"
@@ -501,7 +578,7 @@
     (:evt '(1 1))
     (:acl '(2 2))
     (:iso '(2 2))
-    (t (error "doesn't look like anything to me"))))
+    (t (error "unknown h4 packet type"))))
 
 (defun hci-parse-len (opcode packet)
   "Extracts the payload length from the HCI packet header"
@@ -601,7 +678,7 @@
            (opcode (getf packet :opcode))
            (header (getf packet :header))
            (payload (getf packet :payload)))
-
+      (hci-log :c2h (getf packet :raw))
       (case opcode
         (:evt (list :evt (decode-hci-event header payload)))
         (:acl (list :acl (decode-hci-acl hci header payload)))
@@ -634,6 +711,58 @@
        (and (eql (car packet) :evt)
             (or (eql (car (cadr packet)) :cmd-status)
                 (eql (car (cadr packet)) :cmd-complete)))))))
+
+;;;;;;;;;;;;; btsnoop
+
+(defun write-bytes (bytelist stream)
+  (loop for byte in bytelist do
+    (write-byte byte stream)))
+
+(defun setbit (shift predicate)
+  (ash (if predicate 1 0) shift))
+
+(defun make-flags (packet)
+  (logior
+   ;; 1: c2h  0: h2c
+   (setbit 0 (eql :c2h (getf packet :direction)))
+   ;; 1: data 0: cmd/evt
+   (setbit 1 (not (eql (getf +h4-types+ :acl) (car (getf packet :packet)))))))
+
+(defun make-header (packet)
+  (let* ((original-length (length (getf packet :packet)))
+         (included-length original-length)
+         (flags (make-flags packet))
+         ;; like that's not a lie lol
+         (cumulative-drops 0)
+         ;; don't really care about correct timestamp
+         (timestamp (getf packet :timestamp)))
+    (append
+     (make-c-int :u32 original-length t)
+     (make-c-int :u32 included-length t)
+     (make-c-int :u32 flags t)
+     (make-c-int :u32 cumulative-drops t)
+     (make-c-int :u64 timestamp t))))
+
+(defun write-btsnoop (path hci-log)
+  (with-open-file (stream path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create
+                          :element-type '(unsigned-byte 8))
+    ;; Magic
+    (write-bytes (to-c-string "btsnoop" t) stream)
+    ;; Version
+    (write-bytes (make-c-int :u32 1 t) stream)
+    ;; Datalink type: UART
+    (write-bytes (make-c-int :u32 1002 t) stream)
+
+    ;; Packets
+    (loop for packet in (reverse hci-log) do
+      (write-bytes (make-header packet) stream)
+      (write-bytes (getf packet :packet) stream))))
+
+(defun hci-log-write ()
+  (write-btsnoop "./snoop.log" *hci-log*))
 
 ;;;;;;;;;;;;; host
 
@@ -914,58 +1043,6 @@
 (make-ad #x01 '(#x03))
  ; => (2 1 3)
 
-(defun char->utf8 (char)
-  "Converts a CL character to a UTF-8 (list of bytes)."
-  ;; Phind made this! 10 bucks well spent
-  ;; https://www.phind.com/search?cache=kohb0esnotediegmqr58rt1m
-  (let ((code (char-code char)))
-    (cond
-      ;; 1-byte sequence
-      ((<= code #x7F)
-       (list code))
-      ;; 2-byte sequence
-      ((<= code #x7FF)
-       (list (logior #xC0 (ash code -6))
-             (logior #x80 (logand code #x3F))))
-      ;; 3-byte sequence
-      ((<= code #xFFFF)
-       (list (logior #xE0 (ash code -12))
-             (logior #x80 (logand (ash code -6) #x3F))
-             (logior #x80 (logand code #x3F))))
-      ;; 4-byte sequence
-      ((<= code #x10FFFF)
-       (list (logior #xF0 (ash code -18))
-             (logior #x80 (logand (ash code -12) #x3F))
-             (logior #x80 (logand (ash code -6) #x3F))
-             (logior #x80 (logand code #x3F)))))))
-
-(char->utf8 #\a)
- ; => (97)
-(char->utf8 #\λ)
- ; => (206 187)
-(char->utf8 #\💻)
- ; => (240 159 146 187)
-
-(defun to-c-string (cl-string &optional null-terminated)
-  "Converts a CL string to a list of bytes"
-  (append
-   (mapcan (lambda (c) (char->utf8 c)) (coerce cl-string 'list))
-   (if null-terminated (list 0) nil)))
-
-(to-c-string "test")
- ; => (116 101 115 116)
-(to-c-string "test" t)
- ; => (116 101 115 116 0)
-(to-c-string "🔵-🦷")
- ; => (240 159 148 181 45 240 159 166 183)
-
-(defun from-c-string (bytes)
-  "Decode an ASCII-encoded string from a list of bytes"
-  ;; This one doesn't support UTF-8
-  (with-output-to-string (s)
-    (dolist (b bytes)
-      (write-char (code-char b) s))))
-
 (defun make-ad-name (name)
   (make-ad :name-complete (to-c-string name)))
 
@@ -989,9 +1066,10 @@
           (progn
             (setf len (- (pull-int encoded :u8) 1))
             (setf type (pull-int encoded :u8))
-            (list
-             (plist-key +ad-types+ type)
-             (pull encoded len))))))
+            (when (>= len 0)
+              (list
+               (plist-key +ad-types+ type)
+               (pull encoded len)))))))
 
 (parse-ad *test-ad*)
  ; => (:FLAGS (1) :NAME-COMPLETE
@@ -1999,6 +2077,7 @@
 
 (time
  (with-hci hci *h2c-path* *c2h-path*
+   (hci-log-reset)
    (format t "================ enter ===============~%")
    (hci-reset hci)
    (hci-read-buffer-size hci)
@@ -2032,8 +2111,13 @@
      (setf (getf *active-conns* conn-handle)
            (decode-c-int (getf address :address) :u32))
 
+     ;; Let's try having the phone discover us first
+     (format t "Listening for ATT..~%")
+     (loop
+       (wait-for-att-request hci conn-handle))
+
      ;; Pop channel selection evt
-     (format t "RX ~A~%" (receive hci))
+     ;; (format t "RX ~A~%" (receive hci))
 
      ;; Upgrade MTU
      (format t "Upgrading MTU..~%")
@@ -2093,3 +2177,5 @@
    ;; (format t "HCI: ~X~%" hci)
    (format t "================ exit ===============~%")
    ))
+
+(hci-log-write)
