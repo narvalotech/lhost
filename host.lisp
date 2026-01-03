@@ -2286,11 +2286,20 @@
      '(0)
      )))
 
+(defun smp-cmac (key text)
+  (reverse
+   (coerce
+    (ironclad:with-authenticating-stream (s :cmac (as-array (reverse key)) :aes)
+      (write-bytes (reverse text) s)
+      )
+    'list)))
+
 (defun smp-f5 (W N1 N2 A1 A2)
-  ;; [v5.4 p1555]
+  ;; [v5.4 p1555 p1577]
   (let* ((salt '(#x6c #x88 #x83 #x91 #xaa #xf5 #xa5 #x38
                  #x60 #x37 #x0b #xdb #x5a #x60 #x83 0xbe))
-         ())))
+         (key-T (smp-cmac salt W))
+         ()
 
 (defun smp-calculate-ltk (conn)
   ())
