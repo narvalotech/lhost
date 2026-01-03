@@ -2195,6 +2195,7 @@
     ;; Reset the SMP context upon receiving Pairing Request
     (setf (get-smp-context)
           (list :iocap iocap
+                :random (make-list 16 :initial-element 0)
                 :our-privkey (smp-make-privkey)))
 
     (smp-make-packet
@@ -2214,6 +2215,7 @@
          (our-pubkey-le (smp-get-privkey conn)))
 
     (format t "SMP: peer pubkey ~X~%" peer-pubkey)
+    (setf (getf (get-smp-context) :peer-pubkey) peer-pubkey)
 
     (unless (= (length our-pubkey-le) 64)
       (error "key conversion error"))
@@ -2225,6 +2227,73 @@
 
 (defun smp-send (hci conn-handle payload)
   (l2cap-send hci conn-handle +l2cap-smp-chan+ payload))
+
+(defun as-array (l)
+  (coerce l '(vector (unsigned-byte 8))))
+
+(defun smp-get-our-pubkey ()
+  (subseq (smp-get-privkey nil) 0 32))
+
+(defun smp-f4 (U V X Z)
+  ;; U: 32B
+  ;; V: 32B
+  ;; X: 16B
+  ;; Z: 1B
+  (reverse
+   (coerce
+    (ironclad:with-authenticating-stream (s :cmac (as-array (reverse X)) :aes)
+      (write-bytes (reverse U) s)
+      (write-bytes (reverse V) s)
+      (write-bytes (list Z) s)
+      )
+    'list)))
+
+(defun smp-send-pairing-confirm (hci conn)
+  (smp-send
+   hci conn
+   (smp-make-packet
+    :pairing-confirm
+    (let* ((nb (getf (get-smp-context) :random)) ; technically random
+           (pk-b-x (subseq (smp-get-our-pubkey) 0 32))
+           (pk-a-x (subseq (getf (get-smp-context) :peer-pubkey) 0 32))
+           (confirm-b (smp-f4 pk-b-x pk-a-x nb 0)))
+      ;; (format t "SMP confirm-b ~X~%" confirm-b)
+      confirm-b))))
+
+(defun smp-process-random (conn data)
+  (declare (ignore conn))
+  (let* ((peer-random data))
+
+    (format t "SMP: peer random ~X~%" peer-random)
+    (setf (getf (get-smp-context) :peer-random) peer-random)
+
+    (smp-make-packet
+     :pairing-random
+     (getf (get-smp-context) :random)
+     )))
+
+(defun smp-process-dhkey-check (conn data)
+  (declare (ignore conn))
+  (let* ((peer-dhkey-check data))
+
+    (format t "SMP: peer DHKey check ~X~%" peer-dhkey-check)
+    (setf (getf (get-smp-context) :peer-dhkey-check) peer-dhkey-check)
+
+    ;; FIXME
+
+    (smp-make-packet
+     :pairing-dhkey-check
+     '(0)
+     )))
+
+(defun smp-f5 (W N1 N2 A1 A2)
+  ;; [v5.4 p1555]
+  (let* ((salt '(#x6c #x88 #x83 #x91 #xaa #xf5 #xa5 #x38
+                 #x60 #x37 #x0b #xdb #x5a #x60 #x83 0xbe))
+         ())))
+
+(defun smp-calculate-ltk (conn)
+  ())
 
 (defun wait-for-security (hci conn)
   (let* ((packet (smp-receive hci conn))
@@ -2239,6 +2308,10 @@
         (smp-process-pairing-req conn data))
        (:pairing-public-key
         (smp-process-public-key conn data))
+       (:pairing-random
+        (smp-process-random conn data))
+       (:pairing-dhkey-check
+        (smp-process-dhkey-check conn data))
      ))))
 
 (defun process-rx (hci)
@@ -2350,12 +2423,16 @@
      (wait-for-security hci conn-handle)
      ;; public key
      (wait-for-security hci conn-handle)
-     ;; TODO: send confirm (we're device B in the MSCs)
-
-     ;; TODO next packet
+     ;; confirm: send Cb
+     (smp-send-pairing-confirm hci conn-handle)
+     ;; random: Na
+     (wait-for-security hci conn-handle)
+     ;; Calculate LTK and MACKey
+     (smp-calculate-ltk)
+     ;; DHKey check
      (wait-for-security hci conn-handle)
 
-     (sleep .5)
+     (sleep 3)
 
      ;; Disconnect
      (format t "Disconnecting from conn-handle ~A~%" conn-handle)
