@@ -2107,6 +2107,140 @@
         (search name (from-c-string encoded-name) :test #'equalp)
         nil)))
 
+(defconstant +smp-opcodes+
+  (list :pairing-request #x01
+        :pairing-response #x02
+        :pairing-confirm #x03
+        :pairing-random #x04
+        :pairing-failed #x05
+        :encryption-information #x06
+        :central-identification #x07
+        :identity-information #x08
+        :identity-address-information #x09
+        :signing-information #x0A
+        :security-request #x0B
+        :pairing-public-key #x0C
+        :pairing-dhkey-check #x0D
+        :pairing-keypress-notification #x0E))
+
+(defconstant +l2cap-smp-chan+ #x0006)
+
+(defun smp? (conn-handle)
+  (lambda (p)
+    ;; sample p: (ACL (CONN-HANDLE 0 LENGTH 3 CHANNEL 4 DATA (3 40 1)))
+    (and (eql (car p) :acl)
+         (eql (getf (cadr p) :conn-handle)
+              conn-handle)
+         (eql (getf (cadr p) :channel)
+              +l2cap-smp-chan+))))
+
+(defun smp-receive (hci conn-handle)
+  (receive-if hci (smp? conn-handle)))
+
+(defparameter *smp-context* '())
+(defmacro get-smp-context ()
+  `*smp-context*)
+
+(defun smp-make-opcode (op-name &optional single)
+  (if (not single)
+      (make-c-int :u8 (getf +smp-opcodes+ op-name))
+      (getf +smp-opcodes+ op-name)))
+
+(defun smp-make-packet (op param)
+  (append (smp-make-opcode op) param))
+
+(ql:quickload 'ironclad)
+
+;; (defun fromhexstream (str)
+;;   (with-input-from-string (is str)
+;;     (loop for i from 0 below (length str) by 2 collect
+;;       (parse-integer (subseq str i (min (+ i 2) (length str))) :radix 16))))
+
+(defun smp-make-privkey ()
+  (ironclad:generate-key-pair :SECP256R1))
+
+(defun smp->ironclad (pubkey)
+  (ironclad:make-public-key
+   :SECP256R1
+   :Y
+   (coerce
+    (let* ((x (reverse (subseq pubkey 0 32)))
+           (y (reverse (subseq pubkey 32 64)))
+           (be (append (list #x04) x y)))
+      be)
+    '(vector (unsigned-byte 8)))))
+
+(defun ironclad->smp (ic-privkey)
+  (let* ((serialized (ironclad:destructure-private-key ic-privkey))
+         (pubkey (coerce (getf serialized :Y) 'list))
+         (x (reverse (subseq pubkey 1 33)))
+         (y (reverse (subseq pubkey 33 65)))
+         (le-pubkey (append x y)))
+    le-pubkey))
+
+(defun smp-get-privkey (conn)
+  (declare (ignore conn))
+  (ironclad->smp (getf (get-smp-context) :our-privkey)))
+
+(defun smp-process-pairing-req (conn data)
+  (declare (ignore conn))
+  (let* ((iocap (pull-int data :u8))
+         ;; (oob-flag (pull-int data :u8))
+         ;; (authreq (pull-int data :u8))
+         ;; (max-key-size (pull-int data :u8))
+         (ini-key-dist (pull-int data :u8))
+         ;; (rsp-key-dist (pull-int data :u8))
+         )
+
+    ;; Reset the SMP context upon receiving Pairing Request
+    (setf (get-smp-context)
+          (list :iocap iocap
+                :our-privkey (smp-make-privkey)))
+
+    (smp-make-packet
+     :pairing-response
+     (list
+      #x03                              ; no display no keyboard
+      #x00                              ; no OOB
+      #x09                              ; LESC, bonding
+      16                                ; max keysize
+      ini-key-dist
+      #x01                              ; rsp keydist: LTK only
+      ))
+    ))
+
+(defun smp-process-public-key (conn data)
+  (let* ((peer-pubkey data)
+         (our-pubkey-le (smp-get-privkey conn)))
+
+    (format t "SMP: peer pubkey ~X~%" peer-pubkey)
+
+    (unless (= (length our-pubkey-le) 64)
+      (error "key conversion error"))
+
+    (smp-make-packet
+     :pairing-public-key
+     our-pubkey-le
+     )))
+
+(defun smp-send (hci conn-handle payload)
+  (l2cap-send hci conn-handle +l2cap-smp-chan+ payload))
+
+(defun wait-for-security (hci conn)
+  (let* ((packet (smp-receive hci conn))
+         (data (getf packet :data))
+         (opcode (pull-int data :u8))
+         (op-name (plist-key +smp-opcodes+ opcode)))
+    (format t "SMP: OP ~X DATA ~X~%" opcode data)
+    (smp-send
+     hci conn
+     (case op-name
+       (:pairing-request
+        (smp-process-pairing-req conn data))
+       (:pairing-public-key
+        (smp-process-public-key conn data))
+     ))))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -2114,6 +2248,54 @@
       (unless packet
         (return-from process-rx nil))
       (format t "RXQ: ~A~%" packet))))
+
+;; Note:
+;; - BT discards the leading #x04 from the public key
+;; -
+
+;; SMP Public Key Exchange (phase 2)
+;;
+;; Initiator: device A
+;;
+;; A -- pub_A -> B
+;; A <- pub_B -- B
+;;
+;; Both: compute DHKey
+;;
+;; Auth stage 1: just works
+;; Both:
+;;   - select a random Na/Nb (ie 128b nonce)
+;;   - set ra, rb = 0
+;; B:
+;;   - compute confirm: f4(pub_B, pub_A, Nb, 0)
+;; A <- cfm_B -- B
+;; A -- Na    -> B
+;; A <- Nb    -- B
+;;
+;; A:
+;;   - compute confirm & verify
+;;
+;; LTK calculation
+;;
+;; input:
+;;   - IOcaps
+;;   - Device addresses
+;;   - Na/Nb/DHKey (ra/rb set to 0 for JW)
+;;
+;; Both:
+;;   - compute LTK + MacKey
+;;     f5(DHKey, Na, Nb, addr_A, addr_B)
+;;   - compute EA/EB (new cfm)
+;;     EA = f6(MacKey, Na, Nb, rb, IOcap_A, addr_A, addr_B)
+;;     EB = f6(MacKey, Nb, Na, ra, IOcap_B, addr_B, addr_A)
+;;
+;; A -- EA  -> B
+;; B: verify EA
+;; A <- EB  -- B
+;; A: verify EB
+;;
+;; ==> DONE
+;; LTK is now derived and usable
 
 (time
  (with-hci hci *h2c-path* *c2h-path*
@@ -2138,8 +2320,7 @@
          (gattc-table)
          ;; Shadow active-conns
          (*active-conns* '())
-         (gatts-hr-handle
-           (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
+         )
 
      ;; Wait for the connection event
      (setf conn-evt (wait-for-conn hci))
@@ -2165,7 +2346,14 @@
 
      (format t "Active conns: ~X~%" *active-conns*)
 
-     ;; TODO: Wait for security
+     ;; pairing request
+     (wait-for-security hci conn-handle)
+     ;; public key
+     (wait-for-security hci conn-handle)
+     ;; TODO: send confirm (we're device B in the MSCs)
+
+     ;; TODO next packet
+     (wait-for-security hci conn-handle)
 
      (sleep .5)
 
