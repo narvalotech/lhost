@@ -95,6 +95,12 @@ static void start_scan(void)
 	printk("Scanning successfully started\n");
 }
 
+/* Use atomic variable, 2 bits for connection and disconnection state */
+static ATOMIC_DEFINE(state, 2U);
+
+#define STATE_CONNECTED    1U
+#define STATE_DISCONNECTED 2U
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
@@ -107,10 +113,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 
 	printk("Connected %s\n", addr);
-
-	if (bt_conn_set_security(conn, BT_SECURITY_L4)) {
-		printk("Failed to set security\n");
-	}
+	(void)atomic_set_bit(state, STATE_CONNECTED);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -205,6 +208,18 @@ int main(void)
 	bt_conn_auth_info_cb_register(&auth_cb_info);
 
 	start_scan();
+
+	while (true) {
+		k_sleep(K_SECONDS(1));
+
+		if (atomic_test_and_clear_bit(state, STATE_CONNECTED)) {
+			k_sleep(K_SECONDS(5)); /* allow peer to finish discovery first */
+
+			if (bt_conn_set_security(default_conn, BT_SECURITY_L2)) {
+				printk("Failed to set security\n");
+			}
+		}
+	}
 
 	return 0;
 }

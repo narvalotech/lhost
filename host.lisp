@@ -68,7 +68,7 @@
 (defun decode-c-int (bytes &optional type)
   (let ((result 0)
         (data (if type
-                  (subseq bytes 0 (u2b type))
+                  (subseq bytes 0 (min (length bytes) (u2b type)))
                   bytes)))
     (dolist (byte (reverse data) result) ; Reverse the byte order for little endian
       (setf result (logior (ash result 8) byte)))))
@@ -296,6 +296,13 @@
      (:status :u8
       :le-len :u16
       :le-num :u8))
+
+    :le-ltk-request-reply
+    (#x201a (:handle :u16
+             :ltk (list :u8))
+     (:status :u8
+      :conn-handle :u16))
+
     ))
 
 (getf *hci-cmds* :write-default-data-length)
@@ -430,11 +437,20 @@
         :handle (pull-int payload :u16)
         :algo (pull-int payload :u8)))
 
+(defun decode-le-ltk-request (payload)
+  (list
+   :le-ltk-request
+   (list
+    :conn-handle (pull-int payload :u16)
+    :random (pull payload 8)
+    :ediv (pull-int payload :u16))))
+
 (defun decode-le-meta (payload)
   (let ((sub (pull-int payload :u8)))
     (case sub
-      (#x02 (decode-adv-report payload))
       (#x01 (decode-conn-complete payload))
+      (#x02 (decode-adv-report payload))
+      (#x05 (decode-le-ltk-request payload))
       (#x0A (decode-enh-conn-complete payload))
       (#x14 (decode-channel-selection-algo payload))
       (otherwise (list :le-unknown :sub sub :raw payload)))))
@@ -448,6 +464,12 @@
               :handle (pull-int payload :u16)
               :reason (pull-int payload :u8))))
 
+(defun evt-encryption-change (payload)
+  (list :encryption-change
+        (list :status (pull-int payload :u8)
+              :handle (pull-int payload :u16)
+              :enabled (pull-int payload :u8))))
+
 (defun evt-num-completed-packets (payload)
   (let ((parsed
           (list :number-of-completed-packets
@@ -460,6 +482,7 @@
 
 (defparameter *hci-events*
   '(#x05 evt-disc-complete
+    #x08 evt-encryption-change
     #x0e evt-cmd-complete
     #x0f evt-cmd-status
     #x13 evt-num-completed-packets
@@ -1096,12 +1119,18 @@
             (list :type (getf report :address-type)
                   :address (getf report :address))))))))
 
+(defun make-address (address type)
+  (list :address address
+        :type type))
+
 (defun wait-for-conn (hci)
   (let ((evt (receive-if hci (evt? :le-enh-conn-complete))))
     (list :handle
           (getf (nth 1 evt) :handle)
           :address
-          (getf (nth 1 evt) :peer-address))))
+          (make-address
+           (decode-c-int (getf (nth 1 evt) :peer-address) :u64)
+           (getf (nth 1 evt) :peer-address-type)))))
 
 (defun wait-for-disconn (hci)
   (let ((evt (receive-if hci (evt? :disconnection-complete))))
@@ -1864,7 +1893,11 @@
 (defparameter *active-conns* '())
 
 (defun get-address (conn)
-  (getf *active-conns* conn))
+  (getf
+   (getf
+    (getf *active-conns* conn)
+    :address)
+   :address))                           ; yo dawg i herd you liked address
 
 ;; cccd storage is just a plist (address . value)
 (defun make-cccd-storage ()
@@ -2107,6 +2140,312 @@
         (search name (from-c-string encoded-name) :test #'equalp)
         nil)))
 
+(defconstant +smp-opcodes+
+  (list :pairing-request #x01
+        :pairing-response #x02
+        :pairing-confirm #x03
+        :pairing-random #x04
+        :pairing-failed #x05
+        :encryption-information #x06
+        :central-identification #x07
+        :identity-information #x08
+        :identity-address-information #x09
+        :signing-information #x0A
+        :security-request #x0B
+        :pairing-public-key #x0C
+        :pairing-dhkey-check #x0D
+        :pairing-keypress-notification #x0E))
+
+(defconstant +l2cap-smp-chan+ #x0006)
+
+(defun smp? (conn-handle)
+  (lambda (p)
+    ;; sample p: (ACL (CONN-HANDLE 0 LENGTH 3 CHANNEL 4 DATA (3 40 1)))
+    (and (eql (car p) :acl)
+         (eql (getf (cadr p) :conn-handle)
+              conn-handle)
+         (eql (getf (cadr p) :channel)
+              +l2cap-smp-chan+))))
+
+(defun smp-receive (hci conn-handle)
+  (receive-if hci (smp? conn-handle)))
+
+(defparameter *smp-context* '())
+(defmacro get-smp-context ()
+  `*smp-context*)
+
+(defun smp-make-opcode (op-name &optional single)
+  (if (not single)
+      (make-c-int :u8 (getf +smp-opcodes+ op-name))
+      (getf +smp-opcodes+ op-name)))
+
+(defun smp-make-packet (op param)
+  (append (smp-make-opcode op) param))
+
+(ql:quickload 'ironclad)
+
+(defun smp-make-privkey ()
+  (ironclad:generate-key-pair :SECP256R1))
+
+(defun smp->ironclad (pubkey)
+  (ironclad:make-public-key
+   :SECP256R1
+   :Y
+   (coerce
+    (let* ((x (reverse (subseq pubkey 0 32)))
+           (y (reverse (subseq pubkey 32 64)))
+           (be (append (list #x04) x y)))
+      be)
+    '(vector (unsigned-byte 8)))))
+
+(defun ironclad->smp (ic-privkey)
+  (let* ((serialized (ironclad:destructure-private-key ic-privkey))
+         (pubkey (coerce (getf serialized :Y) 'list))
+         (x (reverse (subseq pubkey 1 33)))
+         (y (reverse (subseq pubkey 33 65)))
+         (le-pubkey (append x y)))
+    le-pubkey))
+
+(defun smp-get-privkey (conn)
+  (declare (ignore conn))
+  (ironclad->smp (getf (get-smp-context) :our-privkey)))
+
+(defun smp-dhkey (conn)
+  (declare (ignore conn))
+  (let* ((priv (getf (get-smp-context) :our-privkey))
+         (pub (smp->ironclad (getf (get-smp-context) :peer-pubkey))))
+    (format t "SMP: priv ~X~%" priv)
+    (format t "SMP: pub ~X~%" (getf (get-smp-context) :peer-pubkey))
+    (setf
+     (getf (get-smp-context) :dhkey)
+     (reverse
+      (subseq
+       (coerce
+        (ironclad:diffie-hellman priv pub)
+        'list) 1 33)))))
+
+(defun as-array (l)
+  (coerce l '(vector (unsigned-byte 8))))
+
+(defun smp-cmac (key &rest texts)
+  (reverse
+   (coerce
+    (ironclad:with-authenticating-stream (s :cmac (as-array (reverse key)) :aes)
+      (mapcar (lambda (e) (write-bytes (reverse e) s))
+              texts))
+    'list)))
+
+(defconstant +iocap-no-display-no-keyboard+ #x03)
+
+(defconstant +our-iocap+ '(#x03 #x00 #x09))
+
+(defun smp-process-pairing-req (conn data)
+  (declare (ignore conn))
+  (let* ((iocap (pull-int data :u8))
+         (oob-flag (pull-int data :u8))
+         (authreq (pull-int data :u8))
+         (max-key-size (pull-int data :u8))
+         (ini-key-dist (pull-int data :u8))
+         (rsp-key-dist (pull-int data :u8)))
+    (declare (ignore max-key-size rsp-key-dist))
+
+    ;; [v5.4 p1557] ok so here's the gotcha: iocap in the PDU description IS NOT
+    ;; the same IOcap as used in the f6 function. There it means
+    ;; iocap+oob+authreq, so we save that instead.
+    (unless (equal +our-iocap+ (list iocap oob-flag authreq))
+      (error "IOcap not supported yet"))
+
+    ;; Reset the SMP context upon receiving Pairing Request
+    (setf (get-smp-context)
+          (list :iocap (list iocap oob-flag authreq)
+                :random (make-list 16 :initial-element 0)
+                :our-privkey (smp-make-privkey)))
+
+    (smp-make-packet
+     :pairing-response
+     (list
+      +iocap-no-display-no-keyboard+
+      #x00                              ; no OOB
+      #x09                              ; LESC, bonding
+      16                                ; max keysize
+      ini-key-dist
+      #x01                              ; rsp keydist: LTK only
+      ))
+    ))
+
+(defun smp-process-public-key (conn data)
+  (let* ((peer-pubkey data)
+         (our-pubkey-le (smp-get-privkey conn)))
+
+    ;; (format t "SMP: peer pubkey ~X~%" peer-pubkey)
+    (setf (getf (get-smp-context) :peer-pubkey) peer-pubkey)
+
+    (unless (= (length our-pubkey-le) 64)
+      (error "key conversion error"))
+
+    (smp-make-packet :pairing-public-key
+                     our-pubkey-le)))
+
+(defun smp-send (hci conn-handle payload)
+  (l2cap-send hci conn-handle +l2cap-smp-chan+ payload))
+
+(defun smp-get-our-pubkey ()
+  (subseq (smp-get-privkey nil) 0 32))
+
+(defun smp-f4 (U V X Z)
+  (smp-cmac X U V Z))
+
+(defun smp-send-pairing-confirm (hci conn)
+  (smp-send
+   hci conn
+   (smp-make-packet
+    :pairing-confirm
+    (let* ((nb (getf (get-smp-context) :random)) ; technically random
+           (pk-b-x (subseq (smp-get-our-pubkey) 0 32))
+           (pk-a-x (subseq (getf (get-smp-context) :peer-pubkey) 0 32))
+           (confirm-b (smp-f4 pk-b-x pk-a-x nb (make-c-int :u8 0))))
+      ;; (format t "SMP confirm-b ~X~%" confirm-b)
+      confirm-b))))
+
+(defun smp-process-random (conn data)
+  (declare (ignore conn))
+  (let* ((peer-random data))
+
+    ;; (format t "SMP: peer random ~X~%" peer-random)
+    (setf (getf (get-smp-context) :peer-random) peer-random)
+
+    (smp-make-packet :pairing-random
+                     (getf (get-smp-context) :random))))
+
+(defun smp-f6 (W N1 N2 R IOcap A1 A2)
+  ;; (format t "SMP: f6: W ~X~%" W)
+  ;; (format t "SMP: f6: N1 ~X~%" N1)
+  ;; (format t "SMP: f6: N2 ~X~%" N2)
+  ;; (format t "SMP: f6: A1 ~X~%" A1)
+  ;; (format t "SMP: f6: A2 ~X~%" A2)
+  ;; (format t "SMP: f6: R ~X~%" R)
+  ;; (format t "SMP: f6: iocap ~X~%" IOcap)
+  (smp-cmac W N1 N2 R IOcap A1 A2))
+
+(defun smp-addr (conn &key peer)
+  (let ((address (getf
+                  (getf *active-conns* conn)
+                  (if peer :address :our-address))))
+    (append
+     (make-uint 6 (getf address :address))
+     (make-uint 1 (logand (getf address :type) #x01)))))
+
+(defun smp-compute-dhkey-check (conn)
+  ;; [v5.4 p1556] Calculate Eb
+  (let* ((mackey (getf (get-smp-context) :mackey))
+         (Na (getf (get-smp-context) :peer-random))
+         (Nb (getf (get-smp-context) :random))
+         (r (make-list 16 :initial-element 0))
+         (IOcapB +our-iocap+)
+         (addr-a-c (smp-addr conn :peer t))
+         (addr-b-p (smp-addr conn)))
+    (smp-f6 mackey Nb Na r IOcapB addr-b-p addr-a-c)))
+
+(defun smp-process-dhkey-check (conn data)
+  (let* ((peer-dhkey-check data)
+         (dhkey-check-Eb
+           (smp-compute-dhkey-check conn)))
+
+    ;; (format t "SMP: peer DHKey check ~X~%" peer-dhkey-check)
+    (setf (getf (get-smp-context) :peer-dhkey-check) peer-dhkey-check)
+
+    ;; (format t "SMP: our DHKey check ~X~%" dhkey-check-Eb)
+    (setf (getf (get-smp-context) :our-dhkey-check) dhkey-check-Eb)
+
+    (smp-make-packet :pairing-dhkey-check
+                     dhkey-check-Eb)))
+
+(defun smp-f5 (W N1 N2 A1 A2)
+  ;; [v5.4 p1555 p1577]
+  (let* ((salt (reverse '(#x6c #x88 #x83 #x91 #xaa #xf5 #xa5 #x38
+                          #x60 #x37 #x0b #xdb #x5a #x60 #x83 #xbe)))
+         (key-T (smp-cmac salt W))
+
+         (keyid (reverse (to-c-string "btle")))
+         (mackey (smp-cmac key-T
+                           (make-c-int :u8 0)
+                           keyid
+                           N1
+                           N2
+                           A1
+                           A2
+                           (make-c-int :u16 256)))
+         (ltk (smp-cmac key-T
+                        (make-c-int :u8 1)
+                        keyid
+                        N1
+                        N2
+                        A1
+                        A2
+                        (make-c-int :u16 256))))
+
+    ;; (format t "SMP: f5: T ~X~%" key-T)
+    ;; (format t "SMP: f5: N1 ~X~%" N1)
+    ;; (format t "SMP: f5: N2 ~X~%" N2)
+    ;; (format t "SMP: f5: A1 ~X~%" A1)
+    ;; (format t "SMP: f5: A2 ~X~%" A2)
+    ;; (format t "SMP: f5: mc ~X~%" mackey)
+    ;; (format t "SMP: f5: ltk ~X~%" ltk)
+
+    (append mackey ltk)))
+
+(defun smp-compute-and-store-ltk (conn)
+  (let* ((Np (getf (get-smp-context) :random))
+         (Nc (getf (get-smp-context) :peer-random))
+         (addr-a-c (smp-addr conn :peer t))
+         (addr-b-p (smp-addr conn))
+         (dhkey (smp-dhkey conn))
+         (f5-out (smp-f5 dhkey Nc Np addr-a-c addr-b-p))
+         (mackey (subseq f5-out 0 16))
+         (ltk (subseq f5-out 16 32)))
+    ;; (format t "SMP: dhkey ~X~%" dhkey)
+    ;; (format t "SMP: ltk ~X~%" ltk)
+    ;; (format t "SMP: mackey ~X~%" mackey)
+    (setf (getf (get-smp-context) :ltk) ltk)
+    (setf (getf (get-smp-context) :mackey) mackey)))
+
+(defun wait-for-smp-packet (hci conn)
+  (let* ((packet (smp-receive hci conn))
+         (data (getf packet :data))
+         (opcode (pull-int data :u8))
+         (op-name (plist-key +smp-opcodes+ opcode)))
+    (format t "SMP: OP ~X DATA ~X~%" opcode data)
+    (smp-send
+     hci conn
+     (case op-name
+       (:pairing-request
+        (smp-process-pairing-req conn data))
+       (:pairing-public-key
+        (smp-process-public-key conn data))
+       (:pairing-random
+        (smp-process-random conn data))
+       (:pairing-dhkey-check
+        (smp-process-dhkey-check conn data))
+     ))))
+
+(defun wait-for-encryption (hci conn)
+  (declare (ignore conn))
+  (receive-if hci (evt? :encryption-change)))
+
+(defun provide-ltk (hci conn ltk)
+  (format t "ENCRYPTION: providing LTK ~X~%" ltk)
+  (hci-send-cmd
+   hci
+   (make-hci-cmd :le-ltk-request-reply
+                 :handle conn
+                 :ltk ltk)))
+
+(defun wait-for-ltk (hci conn)
+  (let* ((evt (receive-if hci (evt? :le-ltk-request)))
+         (ltk (getf (get-smp-context) :ltk)))
+    (declare (ignore evt))
+    (provide-ltk hci conn ltk)))
+
 (defun process-rx (hci)
   ;; Just print the packets for now
   (loop
@@ -2114,6 +2453,54 @@
       (unless packet
         (return-from process-rx nil))
       (format t "RXQ: ~A~%" packet))))
+
+;; Note:
+;; - BT discards the leading #x04 from the public key
+;; -> that's just the way it is
+;;
+;; SMP Public Key Exchange (phase 2)
+;;
+;; Initiator: device A
+;;
+;; A -- pub_A -> B
+;; A <- pub_B -- B
+;;
+;; Both: compute DHKey
+;;
+;; Auth stage 1: just works
+;; Both:
+;;   - select a random Na/Nb (ie 128b nonce)
+;;   - set ra, rb = 0
+;; B:
+;;   - compute confirm: f4(pub_B, pub_A, Nb, 0)
+;; A <- cfm_B -- B
+;; A -- Na    -> B
+;; A <- Nb    -- B
+;;
+;; A:
+;;   - compute confirm & verify
+;;
+;; LTK calculation
+;;
+;; input:
+;;   - IOcaps
+;;   - Device addresses
+;;   - Na/Nb/DHKey (ra/rb set to 0 for JW)
+;;
+;; Both:
+;;   - compute LTK + MacKey
+;;     f5(DHKey, Na, Nb, addr_A, addr_B)
+;;   - compute EA/EB (new cfm)
+;;     EA = f6(MacKey, Na, Nb, rb, IOcap_A, addr_A, addr_B)
+;;     EB = f6(MacKey, Nb, Na, ra, IOcap_B, addr_B, addr_A)
+;;
+;; A -- EA  -> B
+;; B: verify EA
+;; A <- EB  -- B
+;; A: verify EB
+;;
+;; ==> DONE
+;; LTK is now derived and usable
 
 (time
  (with-hci hci *h2c-path* *c2h-path*
@@ -2138,14 +2525,15 @@
          (gattc-table)
          ;; Shadow active-conns
          (*active-conns* '())
-         (gatts-hr-handle
-           (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+)))
+         )
 
      ;; Wait for the connection event
      (setf conn-evt (wait-for-conn hci))
      (setf conn-handle (getf conn-evt :handle))
-     (setf (getf *active-conns* conn-handle)
-           (decode-c-int (getf conn-evt :address) :u32))
+     (setf (getf (getf *active-conns* conn-handle) :our-address)
+           (make-address (getf hci :random-address) #x01))
+     (setf (getf (getf *active-conns* conn-handle) :address)
+           (getf conn-evt :address))
 
      ;; Upgrade MTU
      (format t "Upgrading MTU..~%")
@@ -2165,9 +2553,28 @@
 
      (format t "Active conns: ~X~%" *active-conns*)
 
-     ;; TODO: Wait for security
+     ;; pairing request
+     (wait-for-smp-packet hci conn-handle)
+     ;; public key
+     (wait-for-smp-packet hci conn-handle)
+     ;; confirm: send Cb
+     (smp-send-pairing-confirm hci conn-handle)
+     ;; random: Na
+     (wait-for-smp-packet hci conn-handle)
+     ;; Calculate LTK and MACKey
+     (smp-compute-and-store-ltk conn-handle)
+     ;; DHKey check
+     (wait-for-smp-packet hci conn-handle)
+     (format t "Wait for link encryption~%")
+     (wait-for-ltk hci conn-handle)
+     (wait-for-encryption hci conn-handle)
 
-     (sleep .5)
+     (sleep .3)
+
+     ;; Do a read on the encrypted link
+     (format t "Read GAP Device Name: ~A~%"
+             (from-c-string
+              (read-gap-name hci conn-handle gattc-table)))
 
      ;; Disconnect
      (format t "Disconnecting from conn-handle ~A~%" conn-handle)
