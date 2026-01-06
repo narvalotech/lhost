@@ -711,17 +711,25 @@
   (when (cadr packet)
     (push packet (getf hci :rxq))))
 
-(defun receive-rxq (hci)
-  (pop (getf hci :rxq)))
+(defun receive-rxq (hci &optional predicate)
+  (if (not predicate)
+      (pop (getf hci :rxq))
+      (let ((packet (find-if predicate (getf hci :rxq))))
+        (when packet
+          (setf (getf hci :rxq)
+                (delete-if predicate (getf hci :rxq)))
+          packet))))
 
 (defun receive-if (hci predicate &key (from-list nil))
-  ;; TODO: add timeout maybe? But what about bsim blocking process?
-  (loop
-    (let ((packet (if from-list (receive-rxq hci) (receive hci))))
-      (if (funcall predicate packet)
-          ;; strip the H4 header
-          (return-from receive-if (cadr packet))
-          (add-to-rxq hci packet)))))
+  (if from-list
+      (receive-rxq hci predicate)
+      ;; TODO: add timeout maybe? But what about bsim blocking process?
+      (loop
+        (let ((packet (receive hci)))
+          (if (funcall predicate packet)
+              ;; strip the H4 header
+              (return-from receive-if (cadr packet))
+              (add-to-rxq hci packet))))))
 
 (defun receive-cmd (hci)
   "Wait for the next command response/status"
