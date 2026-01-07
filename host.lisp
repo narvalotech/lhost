@@ -720,16 +720,88 @@
                 (delete-if predicate (getf hci :rxq)))
           packet))))
 
-(defun receive-if (hci predicate &key (from-list nil))
-  (if from-list
-      (receive-rxq hci predicate)
-      ;; TODO: add timeout maybe? But what about bsim blocking process?
-      (loop
-        (let ((packet (receive hci)))
-          (if (funcall predicate packet)
-              ;; strip the H4 header
-              (return-from receive-if (cadr packet))
-              (add-to-rxq hci packet))))))
+;; Goal: Allow discovery
+;; TODO: for async
+;; - have thread pulling from hci-h4
+;; - put complete packets into _real_ H4-RXQ
+;;   - and raise "ready" event
+;;
+;; RECEIVE fn
+;; - called from MAIN
+;; - take a predicate and timeout
+;; - execute DRAIN-RXQ
+;; - if no packet in RXQ
+;;   - execute IDLE-WORK
+;;
+;; DRAIN-RXQ
+;; - move all packets from H4-RXQ into RXQ
+;;
+;; IDLE-WORK
+;; - search (from beginning) in RXQ
+;;   - for each recognized packet type, call handler
+;;   - handler MUST NOT block, only TX
+;; - if no more packets to handle
+;;   - sleep until "ready" event
+;;
+;; - exit on disconnect
+;;
+;; Possible backends:
+;; https://github.com/ItsMeForLua/cl-freelock
+;; https://github.com/kchanqvq/fast-mpsc-queue
+;; https://www.sbcl.org/manual/#Queue
+
+(require 'sb-concurrency)
+
+(defun make-rx-mailbox ()
+  (sb-concurrency:make-mailbox :name "HCI RX"))
+
+(defun receive-thread-entrypoint (hci)
+  (loop
+    (sb-concurrency:send-message
+     (getf hci :rx-mailbox)
+     (receive hci))))
+
+(ql:quickload :bordeaux-threads)
+
+(defun receive-in-thread (hci)
+  (bt:make-thread
+   (lambda () (receive-thread-entrypoint hci))
+   :name "HCI RX thread"))
+
+(defun wait-next-hci-rx (hci)
+  (add-to-rxq
+   hci (sb-concurrency:receive-message (getf hci :rx-mailbox))))
+
+(defun drain-rxq (hci)
+  "Move items into our owned HCI RX queue"
+  (loop until (sb-concurrency:mailbox-empty-p (getf hci :rx-mailbox)) do
+    (wait-next-hci-rx hci)))
+
+(defun process-hci (hci packet)
+  ;; Will be redefined later
+  (declare (ignore hci packet)))
+
+(defun do-idle-work (hci)
+  (format t "IDLE~%")
+  (loop
+    (let ((packet (receive-rxq hci)))
+      (format t "IDLE-LOOP packet ~X~%" packet)
+      (if packet
+          (process-hci hci packet)
+          (return-from do-idle-work nil)))))
+
+(defun receive-if (hci predicate)
+  (progn
+    (drain-rxq hci)
+    (loop
+      (let ((packet (receive-rxq hci predicate)))
+        (when packet
+          ;; strip the H4 header
+          (return-from receive-if (cadr packet)))
+        (unless (do-idle-work hci)
+          ;; Sleep until next packet if queue is empty
+          (wait-next-hci-rx hci)
+          )))))
 
 (defun receive-cmd (hci)
   "Wait for the next command response/status"
@@ -802,6 +874,7 @@
    :h2c h2c-stream
    :c2h c2h-stream
    :rxq '()
+   :rx-mailbox (make-rx-mailbox)
    :acl-in '()
    :acl-tx-size 0
    :acl-tx-num 0
@@ -1151,10 +1224,7 @@
          (eql (getf (cadr (cadr p)) :handle) conn-handle))))
 
 (defun wait-for-ncp (hci handle)
-  (let ((queued (receive-if hci (ncp? handle) :from-list t)))
-    (if queued
-        queued
-        (receive-if hci (ncp? handle)))))
+  (receive-if hci (ncp? handle)))
 
 ;; Mandatory:
 ;; - error-rsp
@@ -2091,33 +2161,31 @@
     (funcall (getf (nth (- handle 1) *gatts-table*) :write) conn handle req)
     (att-make-packet :write-rsp '())))
 
-;; Handling ATT server:
-;; - wait for ACL packet
-;;   - this can be swapped for a global "event"
-;;   - TX requests can be "event"
-;;   - even GUI updates
-;; - if ATT, dispatch ATT rsp
-
-(defun wait-for-att-request (hci conn)
-  ;; Wait for the next ATT request
-  (let* ((req (getf (receive-if hci (att? conn nil t)) :data))
-         (op (pull-int req :u8))
+(defun handle-att (hci conn req)
+  (let* ((op (pull-int req :u8))
          (op-name (plist-key +att-opcodes+ op)))
+    (format t "ATT: OP ~X DATA ~X~%" op req)
     (att-send
      hci conn
      (case op-name
-      (:find-by-type-value-req
-       (gatts-process-find-by-type-value conn req))
-      (:read-by-type-req
-       (gatts-process-read-by-type conn req))
-      (:find-information-req
-       (gatts-process-find-information conn req))
-      (:write-req
-       (gatts-process-write conn req))
-      (::read-by-group-type-req
-       (gatts-process-read-by-group-type conn req))
-      (t
-       (att-error-rsp op-name 0 :request-not-supported))))))
+       (:find-by-type-value-req
+        (gatts-process-find-by-type-value conn req))
+       (:read-by-type-req
+        (gatts-process-read-by-type conn req))
+       (:find-information-req
+        (gatts-process-find-information conn req))
+       (:write-req
+        (gatts-process-write conn req))
+       (:read-by-group-type-req
+        (gatts-process-read-by-group-type conn req))
+       (t
+        (att-error-rsp op-name 0 :request-not-supported))))))
+
+(defun wait-for-att-request (hci conn)
+  ;; Wait for the next ATT request
+  (handle-att
+   hci conn
+   (getf (receive-if hci (att? conn nil t)) :data)))
 
 (defun subbb? (conn table handle)
   (let ((cccd
@@ -2260,8 +2328,8 @@
     ;; [v5.4 p1557] ok so here's the gotcha: iocap in the PDU description IS NOT
     ;; the same IOcap as used in the f6 function. There it means
     ;; iocap+oob+authreq, so we save that instead.
-    (unless (equal +our-iocap+ (list iocap oob-flag authreq))
-      (error "IOcap not supported yet"))
+    ;; (unless (equal +our-iocap+ (list iocap oob-flag authreq))
+    ;;   (error "IOcap not supported yet"))
 
     ;; Reset the SMP context upon receiving Pairing Request
     (setf (get-smp-context)
@@ -2417,25 +2485,6 @@
     (setf (getf (get-smp-context) :ltk) ltk)
     (setf (getf (get-smp-context) :mackey) mackey)))
 
-(defun wait-for-smp-packet (hci conn)
-  (let* ((packet (smp-receive hci conn))
-         (data (getf packet :data))
-         (opcode (pull-int data :u8))
-         (op-name (plist-key +smp-opcodes+ opcode)))
-    (format t "SMP: OP ~X DATA ~X~%" opcode data)
-    (smp-send
-     hci conn
-     (case op-name
-       (:pairing-request
-        (smp-process-pairing-req conn data))
-       (:pairing-public-key
-        (smp-process-public-key conn data))
-       (:pairing-random
-        (smp-process-random conn data))
-       (:pairing-dhkey-check
-        (smp-process-dhkey-check conn data))
-     ))))
-
 (defun wait-for-encryption (hci conn)
   (declare (ignore conn))
   (receive-if hci (evt? :encryption-change)))
@@ -2453,6 +2502,49 @@
          (ltk (getf (get-smp-context) :ltk)))
     (declare (ignore evt))
     (provide-ltk hci conn ltk)))
+
+(defun handle-smp (hci conn packet)
+  (let* ((data (getf packet :data))
+         (opcode (pull-int data :u8))
+         (op-name (plist-key +smp-opcodes+ opcode)))
+    (format t "SMP: OP ~X DATA ~X~%" opcode data)
+    (smp-send
+     hci conn
+     (case op-name
+       (:pairing-request
+        (smp-process-pairing-req conn data))
+       (:pairing-public-key
+        (smp-process-public-key conn data))
+       (:pairing-random
+        (smp-process-random conn data))
+       (:pairing-dhkey-check
+        (smp-process-dhkey-check conn data))
+       ))))
+
+(defun wait-for-smp-packet (hci conn)
+  (handle-smp hci conn (smp-receive hci conn)))
+
+(defun handle-acl (hci packet)
+  ;; TODO per-conn handling
+  ;; For some weird reason (probably pebcak) CASE doesn't work with constants.
+  (cond
+    ((eql (getf packet :channel) +l2cap-att-chan+)
+     (handle-att hci (getf packet :conn-handle) (getf packet :data)))
+    ((eql (getf packet :channel) +l2cap-smp-chan+)
+     (handle-smp hci (getf packet :conn-handle) packet))
+    (t (error "Unknown l2cap channel"))
+    ))
+
+(defun handle-evt (hci packet)
+  ;; TODO: don't /dev/null the 'vents
+  (declare (ignore hci))
+  (format t "HANDLE-EVT ~X~%" packet))
+
+(defun process-hci (hci packet)
+  (format t "PROCESS-HCI ~X~%" packet)
+  (case (car packet)
+    (:acl (handle-acl hci (cadr packet))
+     :evt (handle-evt hci (cadr packet)))))
 
 (defun process-rx (hci)
   ;; Just print the packets for now
@@ -2516,6 +2608,8 @@
    (format t "================ enter ===============~%")
    (format t "Our table: ~%~A~%" (gattc-print *gatts-table*))
 
+   (receive-in-thread hci)
+
    (hci-reset hci)
    (hci-read-buffer-size hci)
    (hci-allow-all-the-events hci)
@@ -2561,19 +2655,26 @@
 
      (format t "Active conns: ~X~%" *active-conns*)
 
-     ;; pairing request
-     (wait-for-smp-packet hci conn-handle)
-     ;; public key
-     (wait-for-smp-packet hci conn-handle)
-     ;; confirm: send Cb
+     (unless (getf (get-smp-context) :iocap)
+       (wait-for-smp-packet hci conn-handle))
+
+     (unless (getf (get-smp-context) :peer-pubkey)
+       (wait-for-smp-packet hci conn-handle))
+
      (smp-send-pairing-confirm hci conn-handle)
-     ;; random: Na
-     (wait-for-smp-packet hci conn-handle)
+
+     (unless (getf (get-smp-context) :peer-random)
+         (wait-for-smp-packet hci conn-handle))
+
      ;; Calculate LTK and MACKey
      (smp-compute-and-store-ltk conn-handle)
+
      ;; DHKey check
-     (wait-for-smp-packet hci conn-handle)
+     (unless (getf (get-smp-context) :peer-dhkey-check)
+         (wait-for-smp-packet hci conn-handle))
+
      (format t "Wait for link encryption~%")
+
      (wait-for-ltk hci conn-handle)
      (wait-for-encryption hci conn-handle)
 
@@ -2590,6 +2691,7 @@
      (wait-for-disconn hci)
 
      ;; Process ignored packets
+     (format t "Processing ignored packets~%")
      (process-rx hci)
      )
 
