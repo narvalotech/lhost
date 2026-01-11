@@ -2539,7 +2539,8 @@
 
 (defun wait-for-ltk (hci conn)
   (let* ((evt (receive-if hci (evt? :le-ltk-request)))
-         (ltk (getf (get-smp-context) :ltk)))
+         (ltk (or (getf (get-smp-context) :ltk)
+                  (get-ltk conn))))
     (declare (ignore evt))
     (provide-ltk hci conn ltk)))
 
@@ -2654,6 +2655,30 @@
 ;; ==> DONE
 ;; LTK is now derived and usable
 
+(defun bond-address (bond)
+  (getf
+   (getf bond :peer)
+   ;; some day I'll use proper objects
+   :address))
+
+(defparameter *bonds* (make-hash-table))
+(defun store-bond (bond)
+  (setf
+   (gethash (bond-address bond) *bonds*)
+   bond))
+
+(defun make-bond (address ltk)
+  (list :peer address
+        :ltk ltk))
+
+(defun is-bonded (address)
+  (gethash (getf address :address) *bonds*))
+
+(defun get-ltk (conn)
+  (getf
+   (gethash (get-address conn) *bonds*)
+   :ltk))
+
 (time
  (with-hci hci *h2c-path* *c2h-path*
    (hci-log-reset)
@@ -2690,29 +2715,32 @@
      (setf (getf (getf *active-conns* conn-handle) :address)
            (getf conn-evt :address))
 
-     ;; Upgrade MTU
-     (format t "Upgrading MTU..~%")
-     (format t "Negotiated MTU ~A~%" (att-set-mtu hci conn-handle 255))
-     ;; Wait for NCP belonging to ATT REQ
-     (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
+     (unless (is-bonded (getf (getf *active-conns* conn-handle) :address))
+       (format t "Wait for pairing sequence~%")
 
-     (unless (getf (get-smp-context) :iocap)
-       (wait-for-smp-packet hci conn-handle))
-
-     (unless (getf (get-smp-context) :peer-pubkey)
-       (wait-for-smp-packet hci conn-handle))
-
-     (smp-send-pairing-confirm hci conn-handle)
-
-     (unless (getf (get-smp-context) :peer-random)
+       (unless (getf (get-smp-context) :iocap)
          (wait-for-smp-packet hci conn-handle))
 
-     ;; Calculate LTK and MACKey
-     (smp-compute-and-store-ltk conn-handle)
-
-     ;; DHKey check
-     (unless (getf (get-smp-context) :peer-dhkey-check)
+       (unless (getf (get-smp-context) :peer-pubkey)
          (wait-for-smp-packet hci conn-handle))
+
+       (smp-send-pairing-confirm hci conn-handle)
+
+       (unless (getf (get-smp-context) :peer-random)
+         (wait-for-smp-packet hci conn-handle))
+
+       ;; Calculate LTK and MACKey
+       (smp-compute-and-store-ltk conn-handle)
+
+       ;; DHKey check
+       (unless (getf (get-smp-context) :peer-dhkey-check)
+         (wait-for-smp-packet hci conn-handle))
+
+       ;; Lets assume it's successful
+       (store-bond
+        (make-bond
+         (getf (getf *active-conns* conn-handle) :address)
+         (getf (get-smp-context) :ltk))))
 
      (format t "Wait for link encryption~%")
 
@@ -2720,6 +2748,12 @@
      (wait-for-encryption hci conn-handle)
 
      (sleep .3)
+
+     ;; Upgrade MTU
+     (format t "Upgrading MTU..~%")
+     (format t "Negotiated MTU ~A~%" (att-set-mtu hci conn-handle 255))
+     ;; Wait for NCP belonging to ATT REQ
+     ;; (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
 
      ;; Discover GATT on the encrypted link
      (setf gattc-table (gattc-discover hci conn-handle))
@@ -2751,6 +2785,6 @@
 
 ;; TODO:
 ;; - multithreaded logging
-;; - JW bonding
 ;; - write support
 ;; - 128bit support
+;; - terminate threads properly
