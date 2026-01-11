@@ -303,6 +303,12 @@
      (:status :u8
       :conn-handle :u16))
 
+    :le-remote-conn-param-req-neg-reply
+    (#x2021 (:handle :u16
+             :reason :u8)
+     (:status :u8
+      :conn-handle :u16))
+
     ))
 
 (getf *hci-cmds* :write-default-data-length)
@@ -445,12 +451,23 @@
     :random (pull payload 8)
     :ediv (pull-int payload :u16))))
 
+(defun decode-le-remote-conn-param-req (payload)
+  (list
+   :le-remote-conn-param-req
+   (list
+    :conn-handle (pull-int payload :u16)
+    :interval-min (pull-int payload :u16)
+    :interval-max (pull-int payload :u16)
+    :max-latency (pull-int payload :u16)
+    :timeout (pull-int payload :u16))))
+
 (defun decode-le-meta (payload)
   (let ((sub (pull-int payload :u8)))
     (case sub
       (#x01 (decode-conn-complete payload))
       (#x02 (decode-adv-report payload))
       (#x05 (decode-le-ltk-request payload))
+      (#x06 (decode-le-remote-conn-param-req payload))
       (#x0A (decode-enh-conn-complete payload))
       (#x14 (decode-channel-selection-algo payload))
       (otherwise (list :le-unknown :sub sub :raw payload)))))
@@ -1391,7 +1408,7 @@
 ;; - [x] add packet queues
 ;; - [x] decode ATT packets
 ;; - [] add NCP / TX queues
-;; - [] add processing of queues?
+;; - [x] add processing of queues?
 ;; - [x] acl (RX) fragmentation
 ;;
 ;; GATT Client
@@ -2535,16 +2552,28 @@
     (t (error "Unknown l2cap channel"))
     ))
 
+(defun process-remote-conn-param (hci packet)
+  (format t "NAK remote conn param ~X~%" packet)
+  (hci-send-cmd hci (make-hci-cmd :le-remote-conn-param-req-neg-reply
+                                  :handle (getf (cadr packet) :conn-handle)
+                                  :reason #x3B)))
+
 (defun handle-evt (hci packet)
   ;; TODO: don't /dev/null the 'vents
   (declare (ignore hci))
-  (format t "HANDLE-EVT ~X~%" packet))
+  (format t "HANDLE-EVT ~X~%" packet)
+  (case (car packet)
+    (:le-remote-conn-param-req
+     (process-remote-conn-param hci packet))))
 
 (defun process-hci (hci packet)
   (format t "PROCESS-HCI ~X~%" packet)
-  (case (car packet)
-    (:acl (handle-acl hci (cadr packet))
-     :evt (handle-evt hci (cadr packet)))))
+  (cond
+    ((eql (car packet) :acl)
+     (handle-acl hci (cadr packet)))
+    ((eql (car packet) :evt)
+     (handle-evt hci (cadr packet)))
+    (t (error "Unknown packet"))))
 
 (defun process-rx (hci)
   ;; Just print the packets for now
