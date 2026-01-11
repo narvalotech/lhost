@@ -2696,18 +2696,6 @@
      ;; Wait for NCP belonging to ATT REQ
      (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
 
-     ;; Discover GATT
-     (setf gattc-table (gattc-discover hci conn-handle))
-     (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
-     (setf *test* gattc-table)
-
-     ;; Read the device name
-     (format t "Read GAP Device Name: ~A~%"
-             (from-c-string
-              (read-gap-name hci conn-handle gattc-table)))
-
-     (format t "Active conns: ~X~%" *active-conns*)
-
      (unless (getf (get-smp-context) :iocap)
        (wait-for-smp-packet hci conn-handle))
 
@@ -2733,10 +2721,17 @@
 
      (sleep .3)
 
-     ;; Do a read on the encrypted link
+     ;; Discover GATT on the encrypted link
+     (setf gattc-table (gattc-discover hci conn-handle))
+     (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
+     (setf *test* gattc-table)
+
+     ;; Read the device name
      (format t "Read GAP Device Name: ~A~%"
              (from-c-string
               (read-gap-name hci conn-handle gattc-table)))
+
+     (format t "Active conns: ~X~%" *active-conns*)
 
      ;; Disconnect
      (format t "Disconnecting from conn-handle ~A~%" conn-handle)
