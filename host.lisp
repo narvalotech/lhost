@@ -911,7 +911,7 @@
 ;;
 ;; Build using devcontainer: https://github.com/narvalotech/zephyr/tree/devcontainer
 ;; cd samples/bluetooth/hci_uart
-;; west build -b nrf52840dongle/nrf52840
+;; west build -b nrf52840dongle/nrf52840 -- -DEXTRA_CONF_FILE='overlay-all-bt_ll_sw_split.conf'
 ;;
 ;; Use nrfdfu to flash:
 ;; nix-shell -p cargo
