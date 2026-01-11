@@ -1432,7 +1432,7 @@
 ;;
 ;; SMP
 ;; - [] periph security request
-;; - [] JustWorks pairing
+;; - [x] JustWorks pairing
 
 (defun decode-handles-and-uuids (data &key 128-bit)
   (loop while data collecting
@@ -2374,7 +2374,7 @@
     ;; Reset the SMP context upon receiving Pairing Request
     (setf (get-smp-context)
           (list :iocap (list iocap oob-flag authreq)
-                :random (make-list 16 :initial-element 0)
+                :random (make-list 16 :initial-element 77) ; technically random
                 :our-privkey (smp-make-privkey)))
 
     (smp-make-packet
@@ -2661,6 +2661,7 @@
    (format t "Our table: ~%~A~%" (gattc-print *gatts-table*))
 
    (receive-in-thread hci)
+   (setf (get-smp-context) '())
 
    (hci-reset hci)
    (hci-read-buffer-size hci)
