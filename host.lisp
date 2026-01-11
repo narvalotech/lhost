@@ -1421,13 +1421,13 @@
 ;; GATT Server
 ;; - [x] error pdu
 ;; - [x] find-information
-;; - [-] read/write
+;; - [x] read/write
 ;; - [x] notifications
 ;;
 ;; Android device
-;; - [] read-by-type on device name (#x2a00)
+;; - [x] read-by-type on device name (#x2a00)
 ;; - [] read-by-type on db hash (#x2b2a)
-;; - [] read-by-type on appearance (#x2a01)
+;; - [x] read-by-type on appearance (#x2a01)
 ;; - [x] read-by-group-type on primary-svc (#x2800)
 ;;
 ;; SMP
@@ -2009,8 +2009,24 @@
        (declare (ignore handle))
        (setf (getf cccd-db (get-address conn)) value)))))
 
+(defconstant +gatt-uuid-gatt-service+ #x1801)
+(defconstant +gatt-uuid-gatt-service-changed+ #x2A05)
+(defconstant +gatt-uuid-gap-service+ #x1800)
+(defconstant +gatt-uuid-gap-appearance+ #x2A01)
+
 (defparameter *gatts-table*
   (gatts-make-table
+   (gatts-make-service +gatt-uuid-gap-service+)
+   (gatts-make-char-decl +gatt-uuid-gap-device-name+ (make-props '(:read)))
+   (gatts-make-char-value +gatt-uuid-gap-device-name+ (list :read (lambda (c h) (to-c-string "LHost"))))
+   (gatts-make-char-decl +gatt-uuid-gap-appearance+ (make-props '(:read)))
+   (gatts-make-char-value +gatt-uuid-gap-appearance+ (list :read (lambda (c h) (make-c-int :u16 #x0012))))
+
+   (gatts-make-service +gatt-uuid-gatt-service+)
+   (gatts-make-char-decl +gatt-uuid-gatt-service-changed+ (make-props '(:indicate)))
+   (gatts-make-char-value +gatt-uuid-gatt-service-changed+ '())
+   (gatts-make-cccd (make-cccd-storage))
+
    (gatts-make-service +gatt-uuid-heart-rate-service+)
    (gatts-make-char-decl +gatt-uuid-heart-rate-measurement+ (make-props '(:read :notify)))
    (gatts-make-char-value +gatt-uuid-heart-rate-measurement+ (list :read #'read-spy))
@@ -2088,8 +2104,6 @@
 (defun gatts-find-char-rsp (table uuid search-start search-end)
   (let* ((handle
            (gatt-find-handle table uuid
-                             ;; type is a bit redundant here..
-                             :type :characteristic-declaration
                              :start search-start :end search-end)))
     (if handle
         (let* ((read-fn
@@ -2174,9 +2188,16 @@
 
 (defun gatts-process-write (conn req)
   (let* ((handle (pull-int req :u16)))
-    (format t "CCCD-WRITE-REQ handle ~X~%" handle)
+    (format t "WRITE-REQ handle ~X~%" handle)
     (funcall (getf (nth (- handle 1) *gatts-table*) :write) conn handle req)
     (att-make-packet :write-rsp '())))
+
+(defun gatts-process-read (conn req)
+  (let* ((handle (pull-int req :u16)))
+    (format t "READ-REQ handle ~X~%" handle)
+    (att-make-packet
+     :read-rsp
+     (funcall (getf (nth (- handle 1) *gatts-table*) :read) conn handle))))
 
 (defun handle-att (hci conn req)
   (let* ((op (pull-int req :u8))
@@ -2193,6 +2214,8 @@
         (gatts-process-find-information conn req))
        (:write-req
         (gatts-process-write conn req))
+       (:read-req
+        (gatts-process-read conn req))
        (:read-by-group-type-req
         (gatts-process-read-by-group-type conn req))
        (t
