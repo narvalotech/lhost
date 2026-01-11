@@ -2748,3 +2748,9 @@
    ))
 
 (hci-log-write)
+
+;; TODO:
+;; - multithreaded logging
+;; - JW bonding
+;; - write support
+;; - 128bit support
