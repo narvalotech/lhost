@@ -772,36 +772,6 @@
                 (delete-if predicate (getf hci :rxq)))
           packet))))
 
-;; Goal: Allow discovery
-;; TODO: for async
-;; - have thread pulling from hci-h4
-;; - put complete packets into _real_ H4-RXQ
-;;   - and raise "ready" event
-;;
-;; RECEIVE fn
-;; - called from MAIN
-;; - take a predicate and timeout
-;; - execute DRAIN-RXQ
-;; - if no packet in RXQ
-;;   - execute IDLE-WORK
-;;
-;; DRAIN-RXQ
-;; - move all packets from H4-RXQ into RXQ
-;;
-;; IDLE-WORK
-;; - search (from beginning) in RXQ
-;;   - for each recognized packet type, call handler
-;;   - handler MUST NOT block, only TX
-;; - if no more packets to handle
-;;   - sleep until "ready" event
-;;
-;; - exit on disconnect
-;;
-;; Possible backends:
-;; https://github.com/ItsMeForLua/cl-freelock
-;; https://github.com/kchanqvq/fast-mpsc-queue
-;; https://www.sbcl.org/manual/#Queue
-
 (require 'sb-concurrency)
 
 (defun make-rx-mailbox ()
@@ -1423,53 +1393,6 @@
     (when rsp
       (pull-int (getf rsp :data) :u8)     ; opcode
       (pull-int (getf rsp :data) :u16)))) ; server RX MTU
-
-;; Async design:
-;;
-;; send cmd: send immediately
-;; -> how to wait for response?
-;; -> start HCI-RAW-RX with filter
-;; -> when filter doesn't match, push RX packet to HCI-RX queue
-;; -> when filter matches, return
-;;
-;; send data: send immediately
-;; -> same pattern
-;; -> be wary of data re-ordering
-;;
-;; idle loop:
-;; -> pull from HCI-RX, dispatch events/data
-;; -> pull from HCI-RAW-RX, dispatch directly
-;;
-;; TODO
-;; - [x] add packet filtering
-;; - [x] add packet queues
-;; - [x] decode ATT packets
-;; - [] add NCP / TX queues
-;; - [x] add processing of queues?
-;; - [x] acl (RX) fragmentation
-;;
-;; GATT Client
-;; - [x] error pdu
-;; - [x] find-information
-;; - [x] discovery
-;; - [x] read/write
-;; - [x] subscribe (CCCD)
-;;
-;; GATT Server
-;; - [x] error pdu
-;; - [x] find-information
-;; - [x] read/write
-;; - [x] notifications
-;;
-;; Android device
-;; - [x] read-by-type on device name (#x2a00)
-;; - [] read-by-type on db hash (#x2b2a)
-;; - [x] read-by-type on appearance (#x2a01)
-;; - [x] read-by-group-type on primary-svc (#x2800)
-;;
-;; SMP
-;; - [] periph security request
-;; - [x] JustWorks pairing
 
 (defun decode-handles-and-uuids (data &key 128-bit)
   (loop while data collecting
@@ -2636,54 +2559,6 @@
      (handle-evt hci (cadr packet)))
     (t (error "Unknown packet"))))
 
-;; Note:
-;; - BT discards the leading #x04 from the public key
-;; -> that's just the way it is
-;;
-;; SMP Public Key Exchange (phase 2)
-;;
-;; Initiator: device A
-;;
-;; A -- pub_A -> B
-;; A <- pub_B -- B
-;;
-;; Both: compute DHKey
-;;
-;; Auth stage 1: just works
-;; Both:
-;;   - select a random Na/Nb (ie 128b nonce)
-;;   - set ra, rb = 0
-;; B:
-;;   - compute confirm: f4(pub_B, pub_A, Nb, 0)
-;; A <- cfm_B -- B
-;; A -- Na    -> B
-;; A <- Nb    -- B
-;;
-;; A:
-;;   - compute confirm & verify
-;;
-;; LTK calculation
-;;
-;; input:
-;;   - IOcaps
-;;   - Device addresses
-;;   - Na/Nb/DHKey (ra/rb set to 0 for JW)
-;;
-;; Both:
-;;   - compute LTK + MacKey
-;;     f5(DHKey, Na, Nb, addr_A, addr_B)
-;;   - compute EA/EB (new cfm)
-;;     EA = f6(MacKey, Na, Nb, rb, IOcap_A, addr_A, addr_B)
-;;     EB = f6(MacKey, Nb, Na, ra, IOcap_B, addr_B, addr_A)
-;;
-;; A -- EA  -> B
-;; B: verify EA
-;; A <- EB  -- B
-;; A: verify EB
-;;
-;; ==> DONE
-;; LTK is now derived and usable
-
 (defun bond-address (bond)
   (getf
    (getf bond :peer)
@@ -2811,3 +2686,26 @@
 ;; - write support
 ;; - 128bit support
 ;; - terminate threads properly
+;; - REPL usage
+;;
+;; Okay so here's what we really need:
+;;
+;; - consume or mangle any data/event from LL
+;; - REPL: send commands and data synchronously
+;; - GUI:  lil bit like REPL. Features:
+;;   - select comport
+;;   - scan/stop
+;;   - adv/stop
+;;   - connect/disconnect
+;;   - conn status+role
+;;   - query peer GATT (cache)
+;;   - query local GATT
+;;   - read/write/notify
+;;   - decoder plug-ins for data
+;;   - ability to coexist w/ REPL
+;;
+;; How do we get there?
+;; - need an HCI "server"
+;;   - send whole packets
+;;   - recv whole packets
+;;   - server start/stop
