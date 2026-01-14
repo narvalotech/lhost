@@ -4,6 +4,41 @@
 
 ;;;;;;;;;;;;; general utils
 
+(ql:quickload :local-time)
+(ql:quickload :bordeaux-threads)
+
+(defparameter *log-levels*
+  '(:tra (5 "TRAC")
+    :dbg (4 "DEBG")
+    :inf (3 "INFO")
+    :wrn (2 "WARN")
+    :err (1 "ERRR")
+    ))
+
+(defparameter *current-log-level* :dbg)
+(defparameter *log-lock* (bt:make-lock "logs"))
+
+(defun yeet-log-message (severity)
+  (let ((current-severity (nth 0 (getf *log-levels* *current-log-level*)))
+        (msg-severity (nth 0 (getf *log-levels* severity))))
+    (> msg-severity current-severity)))
+
+(defun poor-mans-log (severity message)
+  (unless (yeet-log-message severity)
+    (bt:with-lock-held (*log-lock*)
+      (format *error-output*  "[~A] ~A: ~A~%"
+              (local-time:now)
+              (nth 1 (getf *log-levels* severity))
+              message))))
+
+(defun log-trace (message) (poor-mans-log :tra message))
+(defun log-dbg (message) (poor-mans-log :dbg message))
+(defun log-inf (message) (poor-mans-log :inf message))
+(defun log-wrn (message) (poor-mans-log :wrn message))
+(defun log-err (message) (poor-mans-log :err message))
+
+;;;;;;;;;;;;; general utils
+
 (defconstant +u64-max+ (ldb (byte 64 0) -1))
 
 (defun make-range (max)
@@ -168,7 +203,7 @@
               (list (read-byte stream))
               (loop for byte from 0 to (- bytes 1) collect
                                                    (read-byte stream)))))
-    ;; (format t "read-bytes: ~A~%" b)
+    ;; (format nil "read-bytes: ~A" b)
     b))
 
 (defun make-simplex-raw-fd-stream (file is-output)
@@ -189,16 +224,16 @@
         (tx (getf sim :tx))
         (time (getf sim :time)))
     (setf time (+ time (* ms 1000)))
-    (format t "waiting until ~A us (delta ~A ms).." (getf sim :time) ms)
+    (log-dbg (format nil "waiting until ~A us (delta ~A ms).." (getf sim :time) ms))
 
     (write-sequence (make-wait-cmd time) tx)
     (setf (getf sim :time) time)
 
     (read-bytes 4 rx)
-    (format t "done~%")))
+    (log-dbg (format nil "done"))))
 
 (defun sim-terminate (sim)
-  (format t "term~%")
+  (log-dbg (format nil "term"))
   (write-sequence (make-terminate-cmd) (getf sim :tx)))
 
 ;;;;;;;;;;;;; HCI packet-building
@@ -560,7 +595,7 @@
          (serialized-params
            (serialize-hci-params params param-spec)))
 
-    ;; (format t "OP: ~x param-spec: ~A params ~A~%" opcode param-spec params)
+    ;; (log-dbg (format nil "OP: ~x param-spec: ~A params ~A" opcode param-spec params))
     (append
      (make-c-int :u16 opcode)
      (make-c-int :u8 (length serialized-params))
@@ -568,7 +603,7 @@
 
 ;; HCI cmds in plist
 ;; name: (plist of :param-name :type)
-(format nil "~A~%" (make-hci-cmd :write-default-data-length
+(format nil "~A" (make-hci-cmd :write-default-data-length
                                  :tx-octets 200
                                  :tx-time-us 1000))
 ; cmd WRITE-DEFAULT-DATA-LENGTH op 2024 param-spec: (TX-OCTETS U16 TX-TIME-US U16) params (TX-OCTETS
@@ -596,7 +631,7 @@
   "Format a payload into H4 and send to hci device"
   (let ((stream (getf hci :h2c))
         (packet (make-h4 type payload)))
-    (format t "TX: ~x~%" packet)
+    (log-trace (format nil "TX: ~x" packet))
     (hci-log :h2c packet)
     (write-sequence packet stream)))
 
@@ -643,27 +678,27 @@
     ;; TODO: don't re-iterate
 
     ;; read h4 opcode
-    ;; (format t "read op~%")
+    ;; (log-dbg (format nil "read op"))
     (setf packet (read-bytes 1 stream))
-    ;; (format t "packet: ~A~%" packet)
+    ;; (log-dbg (format nil "packet: ~A" packet))
 
     ;; parse h4 opcode
     (setf opcode (h4-parse-opcode packet))
 
     ;; read HCI packet header
-    ;; (format t "read header~%")
+    ;; (log-dbg (format nil "read header"))
     (setf header (read-bytes (hci-header-len opcode) stream))
     (setf packet (append packet header))
-    ;; (format t "header: ~X~%" header)
-    ;; (format t "packet: ~A~%" packet)
+    ;; (log-dbg (format nil "header: ~X" header))
+    ;; (log-dbg (format nil "packet: ~A" packet))
 
     ;; parse hci-packet-length from header & read payload
-    ;; (format t "read payload~%")
+    ;; (log-dbg (format nil "read payload"))
     (setf payload (read-bytes
                    (hci-parse-len opcode packet)
                    stream))
     (setf packet (append packet payload))
-    (format t "RX[H4]: ~X~%" packet)
+    (log-trace (format nil "RX[H4]: ~X" packet))
 
     ;; return raw packet and parsed packet
     (list
@@ -692,7 +727,7 @@
               (decode-c-int (subseq l2pac 0 2))))
          (current-size (length l2pac)))
     ;; TODO: error handling?
-    (format t "[ACL-APPEND] (~A/~A) ~X~%" current-size l2size l2pac)
+    (log-trace (format nil "[ACL-APPEND] (~A/~A) ~X" current-size l2size l2pac))
     (if (= l2size current-size)
         (progn
           (setf (getf hci :acl-in) '())
@@ -799,10 +834,10 @@
   (declare (ignore hci packet)))
 
 (defun do-idle-work (hci)
-  (format t "IDLE~%")
+  (log-trace (format nil "IDLE"))
   (loop
     (let ((packet (receive-rxq hci)))
-      (format t "IDLE-LOOP packet ~X~%" packet)
+      (log-trace (format nil "IDLE-LOOP packet ~X" packet))
       (if packet
           (process-hci hci packet)
           (return-from do-idle-work nil)))))
@@ -942,25 +977,27 @@
            )))))
 
 ;; (with-bsim sim *bs-rx-path* *bs-tx-path*
-;;   (format t "connected to PHY (rx ~A tx ~A)~%"
+;;   (log-dbg (format nil "connected to PHY (rx ~A tx ~A)"
 ;;           (sb-posix:file-descriptor (getf sim :rx))
-;;           (sb-posix:file-descriptor (getf sim :tx)))
+;;           (sb-posix:file-descriptor (getf sim :tx))))
 ;;   (sim-wait 1000 sim)
 ;;   (sim-terminate sim))
 
 (defun hci-send-cmd (hci cmd)
   "Send a command and check it's return status. Return status/params if no error."
 
+  (log-dbg (format nil "CMD-TX: ~x" cmd))
   (send hci :cmd cmd)
+
   (let ((response (receive-cmd hci)))
     ;; Here `response` is an HCI event object, e.g.
     ;; (CMD-COMPLETE (NCMD 1 OPCODE C03 PARAMS (STATUS 0)))
-    (format t "RX: ~x~%" response)
+    (log-dbg (format nil "CMD-RX: ~x" response))
 
     (if (eql (car response) :cmd-status)
         (let* ((status (getf (nth 1 response) :status)))
           (unless (zerop status)
-            (format t "cmd failed: status 0x~x~%" status)
+            (log-dbg (format nil "cmd failed: status 0x~x" status))
             (break))
           status)
 
@@ -971,7 +1008,7 @@
 
           (if (not (equal status 0))
               (progn
-                (format t "cmd failed: status 0x~x~%" status)
+                (log-dbg (format nil "cmd failed: status 0x~x" status))
                 (break)))
 
           (if (equal status 0)
@@ -1630,7 +1667,7 @@
         (when rsp
           ;; Calculate handle for next request
           (setf start (1+ (getf (car (last rsp)) :handle)))
-          (format t "DESC ~A~%" rsp)
+          (log-dbg (format nil "DESC ~A" rsp))
           ;; TODO: add a dedicated CCCD type
           (mapcar
            (lambda (el)
@@ -1705,7 +1742,7 @@
                                       (type nil)
                                       (start 1)
                                       (end #xFFFF))
-  (format t "GATT-FIND-HANDLE uuid ~X start ~X end ~X ~A~%" uuid start end type)
+  (log-dbg (format nil "GATT-FIND-HANDLE uuid ~X start ~X end ~X ~A" uuid start end type))
   "Find a needle in a haystack"
   (getf
    (find-if
@@ -1728,7 +1765,7 @@
    :handle))
 
 (defun att-read (hci conn handle)
-  (format t "READING ~X~%" handle)
+  (log-dbg (format nil "READING ~X" handle))
   (att-send hci conn
             (att-make-packet :read-req
                              (append
@@ -1737,7 +1774,7 @@
          (data (getf rsp :data)))
     (when rsp
       (if (att-error? (pull-int data :u8))
-          (format t "ATT-READ-REQ ERROR: ~X~%" data)
+          (log-dbg (format nil "ATT-READ-REQ ERROR: ~X" data))
           data))))
 
 (defun find-gap-name-handle (table)
@@ -1760,7 +1797,7 @@
 
 (defun att-write (hci conn handle value)
   ;; TODO: MTU checks, yada yada
-  (format t "WRITING ~X~%" handle)
+  (log-dbg (format nil "WRITING ~X" handle))
   (att-send hci conn
             (att-make-packet :write-req
                              (append
@@ -1770,7 +1807,7 @@
          (data (getf rsp :data)))
     (when rsp
       (if (att-error? (pull-int data :u8))
-          (format t "ATT-WRITE-REQ ERROR: ~X~%" data)
+          (log-dbg (format nil "ATT-WRITE-REQ ERROR: ~X" data))
           data))))
 
 (defun gattc-find-cccd-handle (table uuid value-handle)
@@ -1839,10 +1876,10 @@
      (list :name name))))
 
 (defun read-spy (conn handle)
-  (format t "GATTS-READ: conn ~X handle ~X~%" conn handle))
+  (log-dbg (format nil "GATTS-READ: conn ~X handle ~X" conn handle)))
 
 (defun write-spy (conn handle data)
-  (format t "GATTS-WRITE: conn ~X handle ~X data ~X~%" conn handle data))
+  (log-dbg (format nil "GATTS-WRITE: conn ~X handle ~X data ~X" conn handle data)))
 
 (gatts-make-attribute
  :characteristic-value
@@ -2124,7 +2161,7 @@
   (let* ((start (pull-int req :u16))
          (end (pull-int req :u16))
          (type (pull-int req :u16)))
-    (format t "READ-BY-TYPE-REQ start ~X end ~X~%" start end)
+    (log-dbg (format nil "READ-BY-TYPE-REQ start ~X end ~X" start end))
     (gatts-find-char-rsp *gatts-table* type start end)))
 
 (defun gatts-read-by-group-type-rsp (table search-start search-end)
@@ -2147,7 +2184,7 @@
   (let* ((start (pull-int req :u16))
          (end (pull-int req :u16))
          (type (pull-int req :u16)))
-    (format t "READ-BY-GROUP-TYPE-REQ start ~X end ~X~%" start end)
+    (log-dbg (format nil "READ-BY-GROUP-TYPE-REQ start ~X end ~X" start end))
     (if (eql type +gatt-uuid-primary-service+)
         (gatts-read-by-group-type-rsp *gatts-table* start end)
         (att-error-rsp
@@ -2183,18 +2220,18 @@
   (declare (ignore conn))
   (let* ((start (pull-int req :u16))
          (end (pull-int req :u16)))
-    (format t "FIND-INFO-REQ start ~X end ~X~%" start end)
+    (log-dbg (format nil "FIND-INFO-REQ start ~X end ~X" start end))
     (gatts-find-info-rsp *gatts-table* start end)))
 
 (defun gatts-process-write (conn req)
   (let* ((handle (pull-int req :u16)))
-    (format t "WRITE-REQ handle ~X~%" handle)
+    (log-dbg (format nil "WRITE-REQ handle ~X" handle))
     (funcall (getf (nth (- handle 1) *gatts-table*) :write) conn handle req)
     (att-make-packet :write-rsp '())))
 
 (defun gatts-process-read (conn req)
   (let* ((handle (pull-int req :u16)))
-    (format t "READ-REQ handle ~X~%" handle)
+    (log-dbg (format nil "READ-REQ handle ~X" handle))
     (att-make-packet
      :read-rsp
      (funcall (getf (nth (- handle 1) *gatts-table*) :read) conn handle))))
@@ -2202,7 +2239,7 @@
 (defun handle-att (hci conn req)
   (let* ((op (pull-int req :u8))
          (op-name (plist-key +att-opcodes+ op)))
-    (format t "ATT: OP ~X DATA ~X~%" op req)
+    (log-dbg (format nil "ATT: OP ~X DATA ~X" op req))
     (att-send
      hci conn
      (case op-name
@@ -2251,7 +2288,7 @@
   (let* ((ad (getf (copy-tree report) :data))
          (parsed (parse-ad ad))
          (encoded-name (getf parsed :name-complete)))
-    (format t "search ~A in: ~A~%" name encoded-name)
+    (log-dbg (format nil "search ~A in: ~A" name encoded-name))
     (if encoded-name
         (search name (from-c-string encoded-name) :test #'equalp)
         nil)))
@@ -2330,8 +2367,8 @@
   (declare (ignore conn))
   (let* ((priv (getf (get-smp-context) :our-privkey))
          (pub (smp->ironclad (getf (get-smp-context) :peer-pubkey))))
-    (format t "SMP: priv ~X~%" priv)
-    (format t "SMP: pub ~X~%" (getf (get-smp-context) :peer-pubkey))
+    (log-dbg (format nil "SMP: priv ~X" priv))
+    (log-dbg (format nil "SMP: pub ~X" (getf (get-smp-context) :peer-pubkey)))
     (setf
      (getf (get-smp-context) :dhkey)
      (reverse
@@ -2393,7 +2430,7 @@
   (let* ((peer-pubkey data)
          (our-pubkey-le (smp-get-privkey conn)))
 
-    ;; (format t "SMP: peer pubkey ~X~%" peer-pubkey)
+    ;; (log-dbg (format nil "SMP: peer pubkey ~X" peer-pubkey))
     (setf (getf (get-smp-context) :peer-pubkey) peer-pubkey)
 
     (unless (= (length our-pubkey-le) 64)
@@ -2420,27 +2457,27 @@
            (pk-b-x (subseq (smp-get-our-pubkey) 0 32))
            (pk-a-x (subseq (getf (get-smp-context) :peer-pubkey) 0 32))
            (confirm-b (smp-f4 pk-b-x pk-a-x nb (make-c-int :u8 0))))
-      ;; (format t "SMP confirm-b ~X~%" confirm-b)
+      ;; (log-dbg (format nil "SMP confirm-b ~X" confirm-b))
       confirm-b))))
 
 (defun smp-process-random (conn data)
   (declare (ignore conn))
   (let* ((peer-random data))
 
-    ;; (format t "SMP: peer random ~X~%" peer-random)
+    ;; (log-dbg (format nil "SMP: peer random ~X" peer-random))
     (setf (getf (get-smp-context) :peer-random) peer-random)
 
     (smp-make-packet :pairing-random
                      (getf (get-smp-context) :random))))
 
 (defun smp-f6 (W N1 N2 R IOcap A1 A2)
-  ;; (format t "SMP: f6: W ~X~%" W)
-  ;; (format t "SMP: f6: N1 ~X~%" N1)
-  ;; (format t "SMP: f6: N2 ~X~%" N2)
-  ;; (format t "SMP: f6: A1 ~X~%" A1)
-  ;; (format t "SMP: f6: A2 ~X~%" A2)
-  ;; (format t "SMP: f6: R ~X~%" R)
-  ;; (format t "SMP: f6: iocap ~X~%" IOcap)
+  ;; (log-dbg (format nil "SMP: f6: W ~X" W))
+  ;; (log-dbg (format nil "SMP: f6: N1 ~X" N1))
+  ;; (log-dbg (format nil "SMP: f6: N2 ~X" N2))
+  ;; (log-dbg (format nil "SMP: f6: A1 ~X" A1))
+  ;; (log-dbg (format nil "SMP: f6: A2 ~X" A2))
+  ;; (log-dbg (format nil "SMP: f6: R ~X" R))
+  ;; (log-dbg (format nil "SMP: f6: iocap ~X" IOcap))
   (smp-cmac W N1 N2 R IOcap A1 A2))
 
 (defun smp-addr (conn &key peer)
@@ -2467,10 +2504,10 @@
          (dhkey-check-Eb
            (smp-compute-dhkey-check conn)))
 
-    ;; (format t "SMP: peer DHKey check ~X~%" peer-dhkey-check)
+    ;; (log-dbg (format nil "SMP: peer DHKey check ~X" peer-dhkey-check))
     (setf (getf (get-smp-context) :peer-dhkey-check) peer-dhkey-check)
 
-    ;; (format t "SMP: our DHKey check ~X~%" dhkey-check-Eb)
+    ;; (log-dbg (format nil "SMP: our DHKey check ~X" dhkey-check-Eb))
     (setf (getf (get-smp-context) :our-dhkey-check) dhkey-check-Eb)
 
     (smp-make-packet :pairing-dhkey-check
@@ -2500,13 +2537,13 @@
                         A2
                         (make-c-int :u16 256))))
 
-    ;; (format t "SMP: f5: T ~X~%" key-T)
-    ;; (format t "SMP: f5: N1 ~X~%" N1)
-    ;; (format t "SMP: f5: N2 ~X~%" N2)
-    ;; (format t "SMP: f5: A1 ~X~%" A1)
-    ;; (format t "SMP: f5: A2 ~X~%" A2)
-    ;; (format t "SMP: f5: mc ~X~%" mackey)
-    ;; (format t "SMP: f5: ltk ~X~%" ltk)
+    ;; (log-dbg (format nil "SMP: f5: T ~X" key-T))
+    ;; (log-dbg (format nil "SMP: f5: N1 ~X" N1))
+    ;; (log-dbg (format nil "SMP: f5: N2 ~X" N2))
+    ;; (log-dbg (format nil "SMP: f5: A1 ~X" A1))
+    ;; (log-dbg (format nil "SMP: f5: A2 ~X" A2))
+    ;; (log-dbg (format nil "SMP: f5: mc ~X" mackey))
+    ;; (log-dbg (format nil "SMP: f5: ltk ~X" ltk))
 
     (append mackey ltk)))
 
@@ -2519,9 +2556,9 @@
          (f5-out (smp-f5 dhkey Nc Np addr-a-c addr-b-p))
          (mackey (subseq f5-out 0 16))
          (ltk (subseq f5-out 16 32)))
-    ;; (format t "SMP: dhkey ~X~%" dhkey)
-    ;; (format t "SMP: ltk ~X~%" ltk)
-    ;; (format t "SMP: mackey ~X~%" mackey)
+    ;; (log-dbg (format nil "SMP: dhkey ~X" dhkey))
+    ;; (log-dbg (format nil "SMP: ltk ~X" ltk))
+    ;; (log-dbg (format nil "SMP: mackey ~X" mackey))
     (setf (getf (get-smp-context) :ltk) ltk)
     (setf (getf (get-smp-context) :mackey) mackey)))
 
@@ -2530,7 +2567,7 @@
   (receive-if hci (evt? :encryption-change)))
 
 (defun provide-ltk (hci conn ltk)
-  (format t "ENCRYPTION: providing LTK ~X~%" ltk)
+  (log-dbg (format nil "ENCRYPTION: providing LTK ~X" ltk))
   (hci-send-cmd
    hci
    (make-hci-cmd :le-ltk-request-reply
@@ -2548,7 +2585,7 @@
   (let* ((data (getf packet :data))
          (opcode (pull-int data :u8))
          (op-name (plist-key +smp-opcodes+ opcode)))
-    (format t "SMP: OP ~X DATA ~X~%" opcode data)
+    (log-dbg (format nil "SMP: OP ~X DATA ~X" opcode data))
     (smp-send
      hci conn
      (case op-name
@@ -2577,7 +2614,7 @@
     ))
 
 (defun process-remote-conn-param (hci packet)
-  (format t "NAK remote conn param ~X~%" packet)
+  (log-dbg (format nil "NAK remote conn param ~X" packet))
   (hci-send-cmd hci (make-hci-cmd :le-remote-conn-param-req-neg-reply
                                   :handle (getf (cadr packet) :conn-handle)
                                   :reason #x3B)))
@@ -2585,27 +2622,19 @@
 (defun handle-evt (hci packet)
   ;; TODO: don't /dev/null the 'vents
   (declare (ignore hci))
-  (format t "HANDLE-EVT ~X~%" packet)
+  (log-dbg (format nil "HANDLE-EVT ~X" packet))
   (case (car packet)
     (:le-remote-conn-param-req
      (process-remote-conn-param hci packet))))
 
 (defun process-hci (hci packet)
-  (format t "PROCESS-HCI ~X~%" packet)
+  (log-trace (format nil "PROCESS-HCI ~X" packet))
   (cond
     ((eql (car packet) :acl)
      (handle-acl hci (cadr packet)))
     ((eql (car packet) :evt)
      (handle-evt hci (cadr packet)))
     (t (error "Unknown packet"))))
-
-(defun process-rx (hci)
-  ;; Just print the packets for now
-  (loop
-    (let ((packet (receive-rxq hci)))
-      (unless packet
-        (return-from process-rx nil))
-      (format t "RXQ: ~A~%" packet))))
 
 ;; Note:
 ;; - BT discards the leading #x04 from the public key
@@ -2682,8 +2711,8 @@
 (time
  (with-hci hci *h2c-path* *c2h-path*
    (hci-log-reset)
-   (format t "================ enter ===============~%")
-   (format t "Our table: ~%~A~%" (gattc-print *gatts-table*))
+   (log-inf "================ enter ===============")
+   (log-inf (format nil "Our table: ~A~%" (gattc-print *gatts-table*)))
 
    (receive-in-thread hci)
    (setf (get-smp-context) '())
@@ -2716,7 +2745,7 @@
            (getf conn-evt :address))
 
      (unless (is-bonded (getf (getf *active-conns* conn-handle) :address))
-       (format t "Wait for pairing sequence~%")
+       (log-inf (format nil "Wait for pairing sequence"))
 
        (unless (getf (get-smp-context) :iocap)
          (wait-for-smp-packet hci conn-handle))
@@ -2742,7 +2771,7 @@
          (getf (getf *active-conns* conn-handle) :address)
          (getf (get-smp-context) :ltk))))
 
-     (format t "Wait for link encryption~%")
+     (log-inf (format nil "Wait for link encryption"))
 
      (wait-for-ltk hci conn-handle)
      (wait-for-encryption hci conn-handle)
@@ -2750,41 +2779,35 @@
      (sleep .3)
 
      ;; Upgrade MTU
-     (format t "Upgrading MTU..~%")
-     (format t "Negotiated MTU ~A~%" (att-set-mtu hci conn-handle 255))
-     ;; Wait for NCP belonging to ATT REQ
-     ;; (format t "NCP: ~A~%" (wait-for-ncp hci conn-handle))
+     (log-inf "Upgrading MTU..")
+     (log-inf (format nil "Negotiated MTU ~A" (att-set-mtu hci conn-handle 255)))
 
      ;; Discover GATT on the encrypted link
+     (log-inf "Discovering peer table")
      (setf gattc-table (gattc-discover hci conn-handle))
-     (format t "Discovered: ~%~A~%" (gattc-print gattc-table))
+     (log-inf (format nil "Discovered: ~A~%" (gattc-print gattc-table)))
      (setf *test* gattc-table)
 
      ;; Read the device name
-     (format t "Read GAP Device Name: ~A~%"
+     (log-inf (format nil "Read GAP Device Name: ~A"
              (from-c-string
-              (read-gap-name hci conn-handle gattc-table)))
+              (read-gap-name hci conn-handle gattc-table))))
 
-     (format t "Active conns: ~X~%" *active-conns*)
+     (log-inf (format nil "Active conns: ~X" *active-conns*))
 
      ;; Disconnect
-     (format t "Disconnecting from conn-handle ~A~%" conn-handle)
+     (log-inf (format nil "Disconnecting from conn-handle ~A" conn-handle))
      (hci-disconnect hci conn-handle)
      (wait-for-disconn hci)
-
-     ;; Process ignored packets
-     (format t "Processing ignored packets~%")
-     (process-rx hci)
      )
 
-   ;; (format t "HCI: ~X~%" hci)
-   (format t "================ exit ===============~%")
+   (log-dbg (format nil "HCI: ~X" hci))
+   (log-inf "================ exit ===============")
    ))
 
 (hci-log-write)
 
 ;; TODO:
-;; - multithreaded logging
 ;; - write support
 ;; - 128bit support
 ;; - terminate threads properly
