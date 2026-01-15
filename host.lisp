@@ -200,9 +200,12 @@
 (defun read-bytes (bytes stream)
   (let ((b
           (if (equal bytes 1)
-              (list (read-byte stream))
-              (loop for byte from 0 to (- bytes 1) collect
-                                                   (read-byte stream)))))
+              (list (when (open-stream-p stream)
+                      (read-byte stream)))
+              (loop for byte from 0 to (- bytes 1)
+                    collect
+                    (when (open-stream-p stream)
+                      (read-byte stream))))))
     ;; (format nil "read-bytes: ~A" b)
     b))
 
@@ -939,11 +942,17 @@
            )))))
 
 (defmacro with-hci (instance h2c-path c2h-path &body body)
-  (with-gensyms (h2c c2h)
+  (with-gensyms (h2c c2h threads)
     `(with-open-stream (,h2c (open-simplex-fd ,h2c-path t))
        (with-open-stream (,c2h (open-simplex-fd ,c2h-path nil))
-         (let ((,instance (make-hci-dev ,h2c ,c2h)))
-           (progn ,@body)
+         (let ((,threads)
+               (,instance (make-hci-dev ,h2c ,c2h)))
+           (unwind-protect
+                (progn (push (receive-in-thread ,instance) ,threads)
+                       (progn ,@body))
+             (progn
+               (log-dbg (format nil "Killing threads: ~A" ,threads))
+               (mapc #'bt:destroy-thread ,threads)))
            )))))
 
 ;; (with-bsim sim *bs-rx-path* *bs-tx-path*
@@ -2589,8 +2598,8 @@
    (log-inf "================ enter ===============")
    (log-inf (format nil "Our table: ~A~%" (gattc-print *gatts-table*)))
 
-   (receive-in-thread hci)
    (setf (get-smp-context) '())
+   (setf *bonds* (make-hash-table))     ; comment to persist the bonds
 
    (hci-reset hci)
    (hci-read-buffer-size hci)
@@ -2685,7 +2694,6 @@
 ;; TODO:
 ;; - write support
 ;; - 128bit support
-;; - terminate threads properly
 ;; - REPL usage
 ;;
 ;; Okay so here's what we really need:
