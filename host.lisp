@@ -16,6 +16,7 @@
     ))
 
 (defparameter *current-log-level* :dbg)
+(defparameter *log-time* nil)
 (defparameter *log-lock* (bt:make-lock "logs"))
 
 (defun yeet-log-message (severity)
@@ -27,7 +28,7 @@
   (unless (yeet-log-message severity)
     (bt:with-lock-held (*log-lock*)
       (format *error-output*  "[~A] ~A: ~A~%"
-              (local-time:now)
+              (if *log-time* (local-time:now) "")
               (nth 1 (getf *log-levels* severity))
               message))))
 
