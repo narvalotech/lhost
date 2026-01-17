@@ -2455,6 +2455,8 @@
     ;; (log-dbg (format nil "SMP: our DHKey check ~X" dhkey-check-Eb))
     (setf (getf (get-smp-context) :our-dhkey-check) dhkey-check-Eb)
 
+    ;; TODO: verify dhkey. security lol
+
     (smp-make-packet :pairing-dhkey-check
                      dhkey-check-Eb)))
 
@@ -2519,68 +2521,6 @@
                  :handle conn
                  :ltk ltk)))
 
-(defun wait-for-ltk (hci conn)
-  (let* ((evt (receive-if hci (evt? :le-ltk-request)))
-         (ltk (or (getf (get-smp-context) :ltk)
-                  (get-ltk conn))))
-    (declare (ignore evt))
-    (provide-ltk hci conn ltk)))
-
-(defun handle-smp (hci conn packet)
-  (let* ((data (getf packet :data))
-         (opcode (pull-int data :u8))
-         (op-name (plist-key +smp-opcodes+ opcode)))
-    (log-dbg (format nil "SMP: OP ~X DATA ~X" opcode data))
-    (smp-send
-     hci conn
-     (case op-name
-       (:pairing-request
-        (smp-process-pairing-req conn data))
-       (:pairing-public-key
-        (smp-process-public-key conn data))
-       (:pairing-random
-        (smp-process-random conn data))
-       (:pairing-dhkey-check
-        (smp-process-dhkey-check conn data))
-       ))))
-
-(defun wait-for-smp-packet (hci conn)
-  (handle-smp hci conn (smp-receive hci conn)))
-
-(defun handle-acl (hci packet)
-  ;; TODO per-conn handling
-  ;; For some weird reason (probably pebcak) CASE doesn't work with constants.
-  (cond
-    ((eql (getf packet :channel) +l2cap-att-chan+)
-     (handle-att hci (getf packet :conn-handle) (getf packet :data)))
-    ((eql (getf packet :channel) +l2cap-smp-chan+)
-     (handle-smp hci (getf packet :conn-handle) packet))
-    (t (error "Unknown l2cap channel"))
-    ))
-
-(defun process-remote-conn-param (hci packet)
-  (log-dbg (format nil "NAK remote conn param ~X" packet))
-  (hci-send-cmd hci (make-hci-cmd :le-remote-conn-param-req-neg-reply
-                                  :handle (getf (cadr packet) :conn-handle)
-                                  :reason #x3B)))
-
-(defun handle-evt (hci packet)
-  ;; TODO: don't /dev/null the 'vents
-  (declare (ignore hci))
-  (log-dbg (format nil "HANDLE-EVT ~X" packet))
-  (case (car packet)
-    (:le-remote-conn-param-req
-     (process-remote-conn-param hci packet))))
-
-(defun process-hci (hci packet)
-  (log-trace (format nil "PROCESS-HCI ~X" packet))
-  (cond
-    ((eql (car packet) :acl)
-     (handle-acl hci (cadr packet)))
-    ((eql (car packet) :evt)
-     (handle-evt hci (cadr packet)))
-    (t (error "Unknown packet"))))
-
 (defun bond-address (bond)
   (getf
    (getf bond :peer)
@@ -2605,6 +2545,83 @@
    (gethash (get-address conn) *bonds*)
    :ltk))
 
+(defun process-ltk-request (hci evt)
+  (let* ((conn (getf (cadr evt) :conn-handle))
+         (ltk (or (getf (get-smp-context) :ltk)
+                  (get-ltk conn))))
+    (provide-ltk hci conn ltk)))
+
+(defun handle-smp (hci conn packet)
+  (let* ((data (getf packet :data))
+         (opcode (pull-int data :u8))
+         (op-name (plist-key +smp-opcodes+ opcode)))
+    (log-dbg (format nil "SMP: OP ~X DATA ~X" opcode data))
+    (smp-send
+     hci conn
+     (case op-name
+       (:pairing-request
+        (smp-process-pairing-req conn data))
+       (:pairing-public-key
+        (smp-process-public-key conn data))
+       (:pairing-random
+        (smp-process-random conn data))
+       (:pairing-dhkey-check
+        (smp-process-dhkey-check conn data))
+       ))
+
+    (unless (getf (get-smp-context) :sent-confirm)
+      (when (getf (get-smp-context) :peer-pubkey)
+        (setf (getf (get-smp-context) :sent-confirm) t)
+        (smp-send-pairing-confirm hci conn)))
+
+    (unless (getf (get-smp-context) :ltk)
+      (when (getf (get-smp-context) :peer-random)
+        (smp-compute-and-store-ltk conn)))
+
+    (unless (getf (get-smp-context) :stored-bond)
+      (when (getf (get-smp-context) :peer-dhkey-check)
+        (setf (getf (get-smp-context) :stored-bond) t)
+        (store-bond
+         (make-bond
+          (getf (getf *active-conns* conn) :address)
+          (getf (get-smp-context) :ltk)))))
+    ))
+
+(defun handle-acl (hci packet)
+  ;; TODO per-conn handling
+  ;; For some weird reason (probably pebcak) CASE doesn't work with constants.
+  (cond
+    ((eql (getf packet :channel) +l2cap-att-chan+)
+     (handle-att hci (getf packet :conn-handle) (getf packet :data)))
+    ((eql (getf packet :channel) +l2cap-smp-chan+)
+     (handle-smp hci (getf packet :conn-handle) packet))
+    (t (error "Unknown l2cap channel"))
+    ))
+
+(defun process-remote-conn-param (hci packet)
+  (log-dbg (format nil "NAK remote conn param ~X" packet))
+  (hci-send-cmd hci (make-hci-cmd :le-remote-conn-param-req-neg-reply
+                                  :handle (getf (cadr packet) :conn-handle)
+                                  :reason #x3B)))
+
+(defun handle-evt (hci packet)
+  ;; TODO: don't /dev/null the 'vents
+  (log-dbg (format nil "HANDLE-EVT ~X" packet))
+  (case (car packet)
+    (:le-remote-conn-param-req
+     (process-remote-conn-param hci packet))
+    (:le-ltk-request
+     (process-ltk-request hci packet))))
+
+(defun process-hci (hci packet)
+  (log-trace (format nil "PROCESS-HCI ~X" packet))
+  (cond
+    ((eql (car packet) :acl)
+     (handle-acl hci (cadr packet)))
+    ((eql (car packet) :evt)
+     (handle-evt hci (cadr packet)))
+    (t (error "Unknown packet"))))
+
 (time
  (with-hci hci *h2c-path* *c2h-path*
    (hci-log-reset)
@@ -2612,7 +2629,7 @@
    (log-inf (format nil "Our table: ~A~%" (gattc-print *gatts-table*)))
 
    (setf (get-smp-context) '())
-   (setf *bonds* (make-hash-table))     ; comment to persist the bonds
+   ;; (setf *bonds* (make-hash-table))     ; comment to persist the bonds
 
    (hci-reset hci)
    (hci-read-buffer-size hci)
@@ -2633,7 +2650,7 @@
          (*active-conns* '())
          )
 
-     ;; Wait for the connection event
+     (log-inf (format nil "Wait for connection"))
      (setf conn-evt (wait-for-conn hci))
      (setf conn-handle (getf conn-evt :handle))
      (setf (getf (getf *active-conns* conn-handle) :our-address)
@@ -2641,39 +2658,8 @@
      (setf (getf (getf *active-conns* conn-handle) :address)
            (getf conn-evt :address))
 
-     (unless (is-bonded (getf (getf *active-conns* conn-handle) :address))
-       (log-inf (format nil "Wait for pairing sequence"))
-
-       (unless (getf (get-smp-context) :iocap)
-         (wait-for-smp-packet hci conn-handle))
-
-       (unless (getf (get-smp-context) :peer-pubkey)
-         (wait-for-smp-packet hci conn-handle))
-
-       (smp-send-pairing-confirm hci conn-handle)
-
-       (unless (getf (get-smp-context) :peer-random)
-         (wait-for-smp-packet hci conn-handle))
-
-       ;; Calculate LTK and MACKey
-       (smp-compute-and-store-ltk conn-handle)
-
-       ;; DHKey check
-       (unless (getf (get-smp-context) :peer-dhkey-check)
-         (wait-for-smp-packet hci conn-handle))
-
-       ;; Lets assume it's successful
-       (store-bond
-        (make-bond
-         (getf (getf *active-conns* conn-handle) :address)
-         (getf (get-smp-context) :ltk))))
-
      (log-inf (format nil "Wait for link encryption"))
-
-     (wait-for-ltk hci conn-handle)
      (wait-for-encryption hci conn-handle)
-
-     (sleep .3)
 
      ;; Upgrade MTU
      (log-inf "Upgrading MTU..")
