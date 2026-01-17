@@ -67,7 +67,8 @@
     (:u8 1)
     (:u16 2)
     (:u32 4)
-    (:u64 8)))
+    (:u64 8)
+    (:u128 16)))
 
 (defun custom-type (type)
   (case type
@@ -1405,11 +1406,9 @@
 
 (defun decode-handles-and-uuids (data &key 128-bit)
   (loop while data collecting
-        (if 128-bit
-            (list :handle (pull-int data :u16)
-                  :uuid-128 (pull data 16))
-            (list :handle (pull-int data :u16)
-                  :uuid-16 (pull-int data :u16)))))
+        (list :handle (pull-int data :u16)
+              :uuid (decode-c-int
+                     (pull data (if 128-bit 16 2))))))
 
 (defun att-decode-find-information-rsp (data)
   (let ((128-bit (= 2 (pull-int data :u8))))
@@ -1468,8 +1467,18 @@
 (defconstant +gatt-uuid-gap-device-name+ #x2A00)
 
 (defun encode-uuid (uuid)
-  ;; TODO: 128-bit
-  (make-c-int :u16 uuid))
+  (if (<= uuid #xFFFF)
+      (make-c-int :u16 uuid)
+      (make-c-int :u128 uuid)))
+
+(let* ((enc-uuid '(158 202 220 36 14 229 169 224 147 243 163 181 2 0 64 110)))
+  (encode-uuid
+   (decode-c-int
+    (pull enc-uuid (length enc-uuid)))))
+ ; => (158 202 220 36 14 229 169 224 147 243 163 181 2 0 64 110)
+
+(encode-uuid +gatt-uuid-cccd+)
+ ; => (2 41)
 
 (defun last-handle (rsp)
   (getf (car (last rsp)) :end-handle))
@@ -1503,7 +1512,6 @@
                   :handle (getf el :handle)
                   :type :service
                   :end-handle   (getf el :end-handle)
-                  ;; TODO: 128-bit
                   :uuid  (decode-c-int (getf el :value))))
                rsp))))))
 
@@ -1565,9 +1573,7 @@
                 :type :characteristic-declaration
                 :properties (pull-int data :u8)
                 :value-handle (pull-int data :u16)
-                :uuid (if (= uuid-size 2)
-                          (pull-int data :u16)
-                          (pull data uuid-size)))))
+                :uuid (decode-c-int (pull data uuid-size)))))
            rsp))))))
 
 (defun char-end-handle (value-handle chars)
@@ -1604,12 +1610,11 @@
           (mapcar
            (lambda (el)
              ;; Skip the service declarations, we already have them
-             (unless (= (getf el :uuid-16) +gatt-uuid-primary-service+)
+             (unless (= (getf el :uuid) +gatt-uuid-primary-service+)
                (list
                 :handle (getf el :handle)
                 :type :characteristic-descriptor
-                :uuid (getf el :uuid-16)
-                :uuid128 (getf el :uuid-128))))
+                :uuid (getf el :uuid))))
              rsp))))))
 
 (defun gattc-discover (hci conn)
@@ -1662,8 +1667,9 @@
                  (getf attribute :properties)
                  (getf attribute :uuid)))
         (:characteristic-value
-         (format os "~4,'.,X     VALUE~%"
-                 (getf attribute :handle)))
+         (format os "~4,'.,X     VALUE (UUID ~X)~%"
+                 (getf attribute :handle)
+                 (getf attribute :uuid)))
         (:characteristic-descriptor
          (when (eql (getf attribute :uuid) +gatt-uuid-cccd+)
            (format os "~4,'.,X     CCCD~%"
@@ -1688,7 +1694,8 @@
            (eql uuid
                 (if (eql type :service)
                     ;; The service UUID is in the data itself
-                    (decode-c-int (funcall (getf a :read) 0 0) :u16)
+                    (decode-c-int (funcall (getf a :read) 0 0)
+                                  (if (> uuid #xFFFF) :u128 :u16))
                     (getf a :uuid)))
            t)))
     table
@@ -1845,9 +1852,8 @@
                  (append
                   (make-c-int :u8 properties)
                   (make-c-int :u16 (1+ h))
-                  (if (listp uuid)
-                      uuid
-                      (make-c-int :u16 uuid)))))
+                  (make-c-int
+                   (if (> uuid #xFFFF) :u128 :u16) uuid))))
    name))
 
 (defconstant +gatt-characteristic-properties+
@@ -1904,9 +1910,8 @@
    :service
    +gatt-uuid-primary-service+
    (list :read (lambda (c h) (declare (ignore c h))
-                 (if (listp uuid)
-                     uuid
-                     (make-c-int :u16 uuid))))))
+                 (make-c-int
+                  (if (> uuid #xFFFF) :u128 :u16) uuid)))))
 
 (gatts-make-service +gatt-uuid-heart-rate-service+)
  ; => (:TYPE :SERVICE :UUID 10240 :READ
@@ -2000,6 +2005,14 @@
    (gatts-make-char-decl +gatt-uuid-heart-rate-measurement+ (make-props '(:read :notify)))
    (gatts-make-char-value +gatt-uuid-heart-rate-measurement+ (list :read #'read-spy))
    (gatts-make-cccd (make-cccd-storage))
+
+   ;; Dummy nordic uart service to test out 128-bit discovery
+   (gatts-make-service #x6E400001B5A3F393E0A9E50E24DCCA9E)
+   (gatts-make-char-decl #x6E400003B5A3F393E0A9E50E24DCCA9E (make-props '(:read :notify)))
+   (gatts-make-char-value #x6E400003B5A3F393E0A9E50E24DCCA9E (list :read #'read-spy))
+   (gatts-make-cccd (make-cccd-storage))
+   (gatts-make-char-decl #x6E400002B5A3F393E0A9E50E24DCCA9E (make-props '(:write :write-no-rsp)))
+   (gatts-make-char-value #x6E400002B5A3F393E0A9E50E24DCCA9E (list :write #'write-spy))
    ))
 
 (defun read-cccd (conn table value-handle)
@@ -2063,8 +2076,7 @@
   (let* ((start (pull-int req :u16))
          (end (pull-int req :u16))
          (type (pull-int req :u16))
-         ;; TODO: 128b
-         (uuid (pull-int req :u16)))
+         (uuid (decode-c-int (pull req (length req)))))
     (if (eql type +gatt-uuid-primary-service+)
         (gatts-find-service-rsp *gatts-table* uuid start end)
         (att-error-rsp
@@ -2692,8 +2704,6 @@
 (hci-log-write)
 
 ;; TODO:
-;; - write support
-;; - 128bit support
 ;; - REPL usage
 ;;
 ;; Okay so here's what we really need:

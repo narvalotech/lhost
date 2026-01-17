@@ -21,6 +21,150 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
 
+/** @brief UUIDs of Nordic UART GATT Service.
+ * Service: 6e400001-b5a3-f393-e0a9-e50e24dcca9e
+ * RX Char: 6e400002-b5a3-f393-e0a9-e50e24dcca9e
+ * TX Char: 6e400003-b5a3-f393-e0a9-e50e24dcca9e
+ */
+#define BT_UUID_NUS_SRV_VAL \
+	BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
+#define BT_UUID_NUS_RX_CHAR_VAL \
+	BT_UUID_128_ENCODE(0x6e400002, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
+#define BT_UUID_NUS_TX_CHAR_VAL \
+	BT_UUID_128_ENCODE(0x6e400003, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
+
+#define BT_UUID_NUS_SERVICE BT_UUID_DECLARE_128(BT_UUID_NUS_SRV_VAL)
+#define BT_UUID_NUS_TX_CHAR BT_UUID_DECLARE_128(BT_UUID_NUS_TX_CHAR_VAL)
+#define BT_UUID_NUS_RX_CHAR BT_UUID_DECLARE_128(BT_UUID_NUS_RX_CHAR_VAL)
+
+/** Required as the service may be instantiated outside of the module */
+ssize_t nus_bt_chr_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+						 const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
+	return 0;
+}
+
+void nus_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
+}
+
+BT_GATT_SERVICE_DEFINE(nus_svc, BT_GATT_PRIMARY_SERVICE(BT_UUID_NUS_SERVICE),
+		       BT_GATT_CHARACTERISTIC(BT_UUID_NUS_TX_CHAR, BT_GATT_CHRC_NOTIFY,
+					      BT_GATT_PERM_NONE, NULL, NULL, NULL),
+		       BT_GATT_CCC(nus_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+		       BT_GATT_CHARACTERISTIC(BT_UUID_NUS_RX_CHAR,
+					      BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+					      BT_GATT_PERM_WRITE, NULL, nus_bt_chr_write, NULL), );
+
+/* ------------------ GATT CLIENT START ------------------ */
+
+static struct bt_conn *default_conn;
+
+static struct bt_uuid_128 discover_uuid = BT_UUID_INIT_128(0);
+static struct bt_gatt_discover_params discover_params;
+static struct bt_gatt_subscribe_params subscribe_params;
+
+static uint8_t notify_func(struct bt_conn *conn,
+			   struct bt_gatt_subscribe_params *params,
+			   const void *data, uint16_t length)
+{
+	if (!data) {
+		printk("[UNSUBSCRIBED]\n");
+		params->value_handle = 0U;
+		return BT_GATT_ITER_STOP;
+	}
+
+	printk("[NOTIFICATION] data %p length %u\n", data, length);
+	if (length == 2) {
+		struct hr {
+			uint8_t flags;
+			uint8_t hr;
+			/* we dont talk about the others.. */
+		};
+		const struct hr* rx = data;
+
+		if (rx->flags == 0x06) {
+			printk("Flags 0x%X HR %d bpm\n", rx->flags, rx->hr);
+		}
+	}
+
+	return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t discover_func(struct bt_conn *conn,
+			     const struct bt_gatt_attr *attr,
+			     struct bt_gatt_discover_params *params)
+{
+	int err;
+
+	if (!attr) {
+		printk("Discover complete\n");
+		(void)memset(params, 0, sizeof(*params));
+		return BT_GATT_ITER_STOP;
+	}
+
+	printk("[ATTRIBUTE] handle %u\n", attr->handle);
+
+	if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_NUS_SERVICE)) {
+		printk("found service decl\n");
+		memcpy(&discover_uuid, BT_UUID_NUS_TX_CHAR, sizeof(discover_uuid));
+		discover_params.uuid = &discover_uuid.uuid;
+		discover_params.start_handle = attr->handle + 1;
+		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+		err = bt_gatt_discover(conn, &discover_params);
+		if (err) {
+			printk("Discover failed (err %d)\n", err);
+		}
+	} else if (!bt_uuid_cmp(discover_params.uuid,
+				BT_UUID_NUS_TX_CHAR)) {
+		printk("found char decl\n");
+		memcpy(&discover_uuid, BT_UUID_GATT_CCC, sizeof(discover_uuid));
+		discover_params.uuid = &discover_uuid.uuid;
+		discover_params.start_handle = attr->handle + 2;
+		discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+		subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
+
+		err = bt_gatt_discover(conn, &discover_params);
+		if (err) {
+			printk("Discover failed (err %d)\n", err);
+		}
+	} else {
+		printk("found sub?\n");
+		subscribe_params.notify = notify_func;
+		subscribe_params.value = BT_GATT_CCC_NOTIFY;
+		subscribe_params.ccc_handle = attr->handle;
+
+		err = bt_gatt_subscribe(conn, &subscribe_params);
+		if (err && err != -EALREADY) {
+			printk("Subscribe failed (err %d)\n", err);
+		} else {
+			printk("[SUBSCRIBED]\n");
+		}
+
+		return BT_GATT_ITER_STOP;
+	}
+
+	return BT_GATT_ITER_STOP;
+}
+
+static void start_discovery(void) {
+	printk("########################################\n");
+	printk("START DISCOVERY\n");
+	memcpy(&discover_uuid, BT_UUID_NUS_SERVICE, sizeof(discover_uuid));
+	discover_params.uuid = &discover_uuid.uuid;
+	discover_params.func = discover_func;
+	discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+	discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+	discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+
+	int err = bt_gatt_discover(default_conn, &discover_params);
+	if (err) {
+		printk("Discover failed(err %d)\n", err);
+		return;
+	}
+}
+
+/* ------------------ GATT CLIENT END ------------------ */
+
 static struct bt_conn *default_conn;
 
 static void start_scan(void);
@@ -215,6 +359,7 @@ int main(void)
 		if (atomic_test_and_clear_bit(state, STATE_CONNECTED)) {
 			k_sleep(K_SECONDS(5)); /* allow peer to finish discovery first */
 
+			start_discovery();
 			if (bt_conn_set_security(default_conn, BT_SECURITY_L2)) {
 				printk("Failed to set security\n");
 			}
