@@ -2622,6 +2622,17 @@
      (handle-evt hci (cadr packet)))
     (t (error "Unknown packet"))))
 
+(defun init-controller (hci)
+  (hci-reset hci)
+  (hci-read-buffer-size hci)
+  (hci-allow-all-the-events hci)
+  (hci-set-random-address hci #xC1234567890A))
+
+(defun start-advertising (hci adv-data)
+  (hci-set-adv-param hci)
+  (hci-set-adv-data hci adv-data)
+  (hci-set-adv-enable t hci))
+
 (time
  (with-hci hci *h2c-path* *c2h-path*
    (hci-log-reset)
@@ -2631,54 +2642,39 @@
    (setf (get-smp-context) '())
    ;; (setf *bonds* (make-hash-table))     ; comment to persist the bonds
 
-   (hci-reset hci)
-   (hci-read-buffer-size hci)
-   (hci-allow-all-the-events hci)
-   (hci-set-random-address hci #xC1234567890A)
+   (init-controller hci)
+   (start-advertising hci (list
+                           (make-ad :flags '(#x01)) ; LE General discoverable
+                           (make-ad-name "lhost")))
 
-   (hci-set-adv-param hci)
-   (hci-set-adv-data hci
-                     (list
-                      (make-ad :flags '(#x01)) ; LE General discoverable
-                      (make-ad-name "lhost")))
-   (hci-set-adv-enable t hci)
-
-   (let ((conn-evt)
-         (conn-handle)
-         (gattc-table)
+   (let ((conn-handle)
          ;; Shadow active-conns
-         (*active-conns* '())
-         )
+         (*active-conns* '()))
 
      (log-inf (format nil "Wait for connection"))
-     (setf conn-evt (wait-for-conn hci))
-     (setf conn-handle (getf conn-evt :handle))
-     (setf (getf (getf *active-conns* conn-handle) :our-address)
-           (make-address (getf hci :random-address) #x01))
-     (setf (getf (getf *active-conns* conn-handle) :address)
-           (getf conn-evt :address))
+     (let ((conn-evt (wait-for-conn hci)))
+       (setf conn-handle (getf conn-evt :handle))
+       (setf (getf (getf *active-conns* conn-handle) :our-address)
+             (make-address (getf hci :random-address) #x01))
+       (setf (getf (getf *active-conns* conn-handle) :address)
+             (getf conn-evt :address)))
 
      (log-inf (format nil "Wait for link encryption"))
      (wait-for-encryption hci conn-handle)
 
-     ;; Upgrade MTU
      (log-inf "Upgrading MTU..")
      (log-inf (format nil "Negotiated MTU ~A" (att-set-mtu hci conn-handle 255)))
 
-     ;; Discover GATT on the encrypted link
      (log-inf "Discovering peer table")
-     (setf gattc-table (gattc-discover hci conn-handle))
-     (log-inf (format nil "Discovered: ~A~%" (gattc-print gattc-table)))
-     (setf *test* gattc-table)
-
-     ;; Read the device name
-     (log-inf (format nil "Read GAP Device Name: ~A"
-             (from-c-string
-              (read-gap-name hci conn-handle gattc-table))))
+     (let ((gattc-table (gattc-discover hci conn-handle)))
+       (log-inf (format nil "Discovered: ~A~%" (gattc-print gattc-table)))
+       (setf *test* gattc-table)
+       (log-inf (format nil "Read GAP Device Name: ~A"
+                        (from-c-string
+                         (read-gap-name hci conn-handle gattc-table)))))
 
      (log-inf (format nil "Active conns: ~X" *active-conns*))
 
-     ;; Disconnect
      (log-inf (format nil "Disconnecting from conn-handle ~A" conn-handle))
      (hci-disconnect hci conn-handle)
      (wait-for-disconn hci)
