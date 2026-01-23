@@ -2222,6 +2222,12 @@
                           (make-c-int :u16 handle)
                           (make-c-int :u8 (att-make-error rsp)))))))
 
+(defun gattc-process-notification (conn req)
+  (declare (ignore conn))
+  (log-dbg (format nil "Notification: handle ~X value ~X"
+                   (pull-int req :u16) req))
+  ;; Don't reply to notifications
+  nil)
 
 (defun handle-att (hci conn req)
   (let* ((op (pull-int req :u8))
@@ -2242,6 +2248,8 @@
         (gatts-process-read conn req))
        (:read-by-group-type-req
         (gatts-process-read-by-group-type conn req))
+       (:handle-value-ntf
+        (gattc-process-notification conn req))
        (t
         (att-error-rsp op-name 0 :request-not-supported))))))
 
