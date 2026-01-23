@@ -337,6 +337,13 @@
       :le-len :u16
       :le-num :u8))
 
+    :le-enable-encryption
+    (#x2019 (:handle :u16
+             :rand :u64
+             :ediv :u16
+             :ltk (list :u8))
+     nil)
+
     :le-ltk-request-reply
     (#x201a (:handle :u16
              :ltk (list :u8))
@@ -954,7 +961,8 @@
                        (progn ,@body))
              (progn
                (log-dbg (format nil "Killing threads: ~A" ,threads))
-               (mapc #'bt:destroy-thread ,threads)))
+               (ignore-errors
+                (mapc #'bt:destroy-thread ,threads))))
            )))))
 
 ;; (with-bsim sim *bs-rx-path* *bs-tx-path*
@@ -1390,7 +1398,9 @@
   (receive-if hci (att? conn-handle (att-make-opcode opcode))))
 
 (defun att-send (hci conn-handle payload)
-  (l2cap-send hci conn-handle +l2cap-att-chan+ payload))
+  (when payload
+    (log-dbg (format nil "ATT-TX ~X" payload))
+    (l2cap-send hci conn-handle +l2cap-att-chan+ payload)))
 
 (defun att-set-mtu (hci conn-handle mtu)
   ;; Send client RX MTU
@@ -2184,7 +2194,7 @@
 (defun handle-att (hci conn req)
   (let* ((op (pull-int req :u8))
          (op-name (plist-key +att-opcodes+ op)))
-    (log-dbg (format nil "ATT: OP ~X DATA ~X" op req))
+    (log-dbg (format nil "ATT-RX: OP ~X DATA ~X" op-name req))
     (att-send
      hci conn
      (case op-name
@@ -2268,9 +2278,10 @@
 (defun smp-receive (hci conn-handle)
   (receive-if hci (smp? conn-handle)))
 
-(defparameter *smp-context* '())
-(defmacro get-smp-context ()
-  `*smp-context*)
+(defparameter *smp-context* (make-hash-table))
+
+(defmacro get-smp-context (conn)
+  `(gethash ,conn *smp-context*))
 
 (defun smp-make-opcode (op-name &optional single)
   (if (not single)
@@ -2305,17 +2316,15 @@
     le-pubkey))
 
 (defun smp-get-privkey (conn)
-  (declare (ignore conn))
-  (ironclad->smp (getf (get-smp-context) :our-privkey)))
+  (ironclad->smp (getf (get-smp-context conn) :our-privkey)))
 
 (defun smp-dhkey (conn)
-  (declare (ignore conn))
-  (let* ((priv (getf (get-smp-context) :our-privkey))
-         (pub (smp->ironclad (getf (get-smp-context) :peer-pubkey))))
+  (let* ((priv (getf (get-smp-context conn) :our-privkey))
+         (pub (smp->ironclad (getf (get-smp-context conn) :peer-pubkey))))
     (log-dbg (format nil "SMP: priv ~X" priv))
-    (log-dbg (format nil "SMP: pub ~X" (getf (get-smp-context) :peer-pubkey)))
+    (log-dbg (format nil "SMP: pub ~X" (getf (get-smp-context conn) :peer-pubkey)))
     (setf
-     (getf (get-smp-context) :dhkey)
+     (getf (get-smp-context conn) :dhkey)
      (reverse
       (subseq
        (coerce
@@ -2337,6 +2346,43 @@
 
 (defconstant +our-iocap+ '(#x03 #x00 #x09))
 
+(defun smp-send-pairing-req (hci conn)
+  (let* ((iocap +iocap-no-display-no-keyboard+)
+         (oob-flag #x00)                ; no OOB
+         (authreq #x09)                 ; LESC, bonding
+         (max-key-size 16)
+         (ini-key-dist #x00)            ; no LTK dist on LESC
+         (rsp-key-dist #x00))
+
+    ;; [v5.4 p1557] ok so here's the gotcha: iocap in the PDU description IS NOT
+    ;; the same IOcap as used in the f6 function. There it means
+    ;; iocap+oob+authreq, so we save that instead.
+    ;; (unless (equal +our-iocap+ (list iocap oob-flag authreq))
+    ;;   (error "IOcap not supported yet"))
+
+    ;; Reset the SMP context upon sending Pairing Request
+    (setf (get-smp-context conn)
+          (list :random (make-list 16 :initial-element 99) ; technically random
+                :our-privkey (smp-make-privkey)))
+
+    (smp-send
+     hci conn
+     (smp-make-packet
+      :pairing-request
+      (list iocap oob-flag authreq
+            max-key-size ini-key-dist rsp-key-dist)))))
+
+(defun smp-process-pairing-rsp (conn data)
+  (let* ((iocap (pull-int data :u8))
+         (oob-flag (pull-int data :u8))
+         (authreq (pull-int data :u8)))
+
+    (setf (getf (get-smp-context conn) :iocap) (list iocap oob-flag authreq))
+    (setf (getf (get-smp-context conn) :initiated-by-us) t)
+
+    ;; Next step is public key
+    (smp-make-packet :pairing-public-key (smp-get-privkey conn))))
+
 (defun smp-process-pairing-req (conn data)
   (declare (ignore conn))
   (let* ((iocap (pull-int data :u8))
@@ -2354,7 +2400,7 @@
     ;;   (error "IOcap not supported yet"))
 
     ;; Reset the SMP context upon receiving Pairing Request
-    (setf (get-smp-context)
+    (setf (get-smp-context conn)
           (list :iocap (list iocap oob-flag authreq)
                 :random (make-list 16 :initial-element 77) ; technically random
                 :our-privkey (smp-make-privkey)))
@@ -2376,19 +2422,26 @@
          (our-pubkey-le (smp-get-privkey conn)))
 
     ;; (log-dbg (format nil "SMP: peer pubkey ~X" peer-pubkey))
-    (setf (getf (get-smp-context) :peer-pubkey) peer-pubkey)
+    (setf (getf (get-smp-context conn) :peer-pubkey) peer-pubkey)
 
     (unless (= (length our-pubkey-le) 64)
       (error "key conversion error"))
 
-    (smp-make-packet :pairing-public-key
-                     our-pubkey-le)))
+    ;; If we're a peripheral, we want to send our public key
+    ;; If we're a central, we wait for the pairing confirm
+
+    (if (getf (get-smp-context conn) :initiated-by-us)
+        nil
+        (smp-make-packet :pairing-public-key
+                         our-pubkey-le))))
 
 (defun smp-send (hci conn-handle payload)
-  (l2cap-send hci conn-handle +l2cap-smp-chan+ payload))
+  (when payload
+    ;; (log-dbg (format nil "SMP-TX ~X" payload))
+    (l2cap-send hci conn-handle +l2cap-smp-chan+ payload)))
 
-(defun smp-get-our-pubkey ()
-  (subseq (smp-get-privkey nil) 0 32))
+(defun smp-get-our-pubkey (conn)
+  (subseq (smp-get-privkey conn) 0 32))
 
 (defun smp-f4 (U V X Z)
   (smp-cmac X U V Z))
@@ -2398,22 +2451,36 @@
    hci conn
    (smp-make-packet
     :pairing-confirm
-    (let* ((nb (getf (get-smp-context) :random)) ; technically random
-           (pk-b-x (subseq (smp-get-our-pubkey) 0 32))
-           (pk-a-x (subseq (getf (get-smp-context) :peer-pubkey) 0 32))
+    (let* ((nb (getf (get-smp-context conn) :random)) ; technically random
+           (pk-b-x (subseq (smp-get-our-pubkey conn) 0 32))
+           (pk-a-x (subseq (getf (get-smp-context conn) :peer-pubkey) 0 32))
            (confirm-b (smp-f4 pk-b-x pk-a-x nb (make-c-int :u8 0))))
       ;; (log-dbg (format nil "SMP confirm-b ~X" confirm-b))
       confirm-b))))
 
+(defun smp-process-confirm (conn data)
+  ;; let's just ignore the confirm for now
+  (declare (ignore data))
+  ;; next step is sending our random
+  (smp-make-packet :pairing-random
+                   (getf (get-smp-context conn) :random)))
+
+(defun smp-send-dhkey-check-ea (hci conn)
+  (let* ((dhkey-check-Ea (smp-compute-dhkey-check conn :Ea t)))
+    (smp-send hci conn
+              (smp-make-packet :pairing-dhkey-check
+                               dhkey-check-Ea))))
+
 (defun smp-process-random (conn data)
-  (declare (ignore conn))
   (let* ((peer-random data))
 
     ;; (log-dbg (format nil "SMP: peer random ~X" peer-random))
-    (setf (getf (get-smp-context) :peer-random) peer-random)
+    (setf (getf (get-smp-context conn) :peer-random) peer-random)
 
-    (smp-make-packet :pairing-random
-                     (getf (get-smp-context) :random))))
+    (if (getf (get-smp-context conn) :initiated-by-us)
+        nil
+        (smp-make-packet :pairing-random
+                         (getf (get-smp-context conn) :random)))))
 
 (defun smp-f6 (W N1 N2 R IOcap A1 A2)
   ;; (log-dbg (format nil "SMP: f6: W ~X" W))
@@ -2433,16 +2500,19 @@
      (make-uint 6 (getf address :address))
      (make-uint 1 (logand (getf address :type) #x01)))))
 
-(defun smp-compute-dhkey-check (conn)
-  ;; [v5.4 p1556] Calculate Eb
-  (let* ((mackey (getf (get-smp-context) :mackey))
-         (Na (getf (get-smp-context) :peer-random))
-         (Nb (getf (get-smp-context) :random))
+(defun smp-compute-dhkey-check (conn &key Ea)
+  ;; [v5.4 p1556] Calculate Ea/Eb
+  (let* ((mackey (getf (get-smp-context conn) :mackey))
+         (Na (getf (get-smp-context conn) (if Ea :random :peer-random)))
+         (Nb (getf (get-smp-context conn) (if Ea :peer-random :random)))
          (r (make-list 16 :initial-element 0))
          (IOcapB +our-iocap+)
+         (IOcapA (getf (get-smp-context conn) :iocap))
          (addr-a-c (smp-addr conn :peer t))
          (addr-b-p (smp-addr conn)))
-    (smp-f6 mackey Nb Na r IOcapB addr-b-p addr-a-c)))
+    (if Ea
+        (smp-f6 mackey Na Nb r IOcapA addr-b-p addr-a-c)
+        (smp-f6 mackey Nb Na r IOcapB addr-b-p addr-a-c))))
 
 (defun smp-process-dhkey-check (conn data)
   (let* ((peer-dhkey-check data)
@@ -2450,15 +2520,15 @@
            (smp-compute-dhkey-check conn)))
 
     ;; (log-dbg (format nil "SMP: peer DHKey check ~X" peer-dhkey-check))
-    (setf (getf (get-smp-context) :peer-dhkey-check) peer-dhkey-check)
+    (setf (getf (get-smp-context conn) :peer-dhkey-check) peer-dhkey-check)
 
     ;; (log-dbg (format nil "SMP: our DHKey check ~X" dhkey-check-Eb))
-    (setf (getf (get-smp-context) :our-dhkey-check) dhkey-check-Eb)
+    (setf (getf (get-smp-context conn) :our-dhkey-check) dhkey-check-Eb)
 
     ;; TODO: verify dhkey. security lol
-
-    (smp-make-packet :pairing-dhkey-check
-                     dhkey-check-Eb)))
+    (when (not (getf (get-smp-context conn) :initiated-by-us))
+      (smp-make-packet :pairing-dhkey-check
+                       dhkey-check-Eb))))
 
 (defun smp-f5 (W N1 N2 A1 A2)
   ;; [v5.4 p1555 p1577]
@@ -2495,8 +2565,8 @@
     (append mackey ltk)))
 
 (defun smp-compute-and-store-ltk (conn)
-  (let* ((Np (getf (get-smp-context) :random))
-         (Nc (getf (get-smp-context) :peer-random))
+  (let* ((Np (getf (get-smp-context conn) :random))
+         (Nc (getf (get-smp-context conn) :peer-random))
          (addr-a-c (smp-addr conn :peer t))
          (addr-b-p (smp-addr conn))
          (dhkey (smp-dhkey conn))
@@ -2506,12 +2576,13 @@
     ;; (log-dbg (format nil "SMP: dhkey ~X" dhkey))
     ;; (log-dbg (format nil "SMP: ltk ~X" ltk))
     ;; (log-dbg (format nil "SMP: mackey ~X" mackey))
-    (setf (getf (get-smp-context) :ltk) ltk)
-    (setf (getf (get-smp-context) :mackey) mackey)))
+    (setf (getf (get-smp-context conn) :ltk) ltk)
+    (setf (getf (get-smp-context conn) :mackey) mackey)))
 
 (defun wait-for-encryption (hci conn)
   (declare (ignore conn))
-  (receive-if hci (evt? :encryption-change)))
+  (receive-if hci (evt? :encryption-change))
+  (setf (getf (get-smp-context conn) :encrypted) t))
 
 (defun provide-ltk (hci conn ltk)
   (log-dbg (format nil "ENCRYPTION: providing LTK ~X" ltk))
@@ -2547,7 +2618,7 @@
 
 (defun process-ltk-request (hci evt)
   (let* ((conn (getf (cadr evt) :conn-handle))
-         (ltk (or (getf (get-smp-context) :ltk)
+         (ltk (or (getf (get-smp-context conn) :ltk)
                   (get-ltk conn))))
     (provide-ltk hci conn ltk)))
 
@@ -2555,36 +2626,56 @@
   (let* ((data (getf packet :data))
          (opcode (pull-int data :u8))
          (op-name (plist-key +smp-opcodes+ opcode)))
-    (log-dbg (format nil "SMP: OP ~X DATA ~X" opcode data))
+    (log-dbg (format nil "SMP-RX: OP ~X DATA ~X" op-name data))
     (smp-send
      hci conn
-     (case op-name
+     (ecase op-name
        (:pairing-request
         (smp-process-pairing-req conn data))
+       (:pairing-response
+        (smp-process-pairing-rsp conn data))
        (:pairing-public-key
         (smp-process-public-key conn data))
+       (:pairing-confirm
+        (smp-process-confirm conn data))
        (:pairing-random
         (smp-process-random conn data))
        (:pairing-dhkey-check
         (smp-process-dhkey-check conn data))
        ))
 
-    (unless (getf (get-smp-context) :sent-confirm)
-      (when (getf (get-smp-context) :peer-pubkey)
-        (setf (getf (get-smp-context) :sent-confirm) t)
+    (unless
+        (getf (get-smp-context conn) :sent-confirm)
+      (when (and
+             (not (getf (get-smp-context conn) :initiated-by-us))
+             (getf (get-smp-context conn) :peer-pubkey))
+        (setf (getf (get-smp-context conn) :sent-confirm) t)
         (smp-send-pairing-confirm hci conn)))
 
-    (unless (getf (get-smp-context) :ltk)
-      (when (getf (get-smp-context) :peer-random)
-        (smp-compute-and-store-ltk conn)))
+    (unless (getf (get-smp-context conn) :ltk)
+      (when (getf (get-smp-context conn) :peer-random)
+        (smp-compute-and-store-ltk conn)
 
-    (unless (getf (get-smp-context) :stored-bond)
-      (when (getf (get-smp-context) :peer-dhkey-check)
-        (setf (getf (get-smp-context) :stored-bond) t)
+        (when (getf (get-smp-context conn) :initiated-by-us)
+          (smp-send-dhkey-check-ea hci conn))))
+
+    (unless (getf (get-smp-context conn) :stored-bond)
+      (when (getf (get-smp-context conn) :peer-dhkey-check)
+        (setf (getf (get-smp-context conn) :stored-bond) t)
         (store-bond
          (make-bond
           (getf (getf *active-conns* conn) :address)
-          (getf (get-smp-context) :ltk)))))
+          (getf (get-smp-context conn) :ltk)))
+
+        ;; If we're the central, we should start encryption now
+        (when (getf (get-smp-context conn) :initiated-by-us)
+          (hci-send-cmd
+           hci
+           (make-hci-cmd :le-enable-encryption
+                         :handle conn
+                         :rand 0
+                         :ediv 0
+                         :ltk (getf (get-smp-context conn) :ltk))))))
     ))
 
 (defun handle-acl (hci packet)
@@ -2604,6 +2695,11 @@
                                   :handle (getf (cadr packet) :conn-handle)
                                   :reason #x3B)))
 
+(defun process-encryption-change (hci packet)
+  (declare (ignore hci))
+  (let ((conn (getf (cadr packet) :handle)))
+    (setf (getf (get-smp-context conn) :encrypted) t)))
+
 (defun handle-evt (hci packet)
   ;; TODO: don't /dev/null the 'vents
   (log-dbg (format nil "HANDLE-EVT ~X" packet))
@@ -2611,7 +2707,10 @@
     (:le-remote-conn-param-req
      (process-remote-conn-param hci packet))
     (:le-ltk-request
-     (process-ltk-request hci packet))))
+     (process-ltk-request hci packet))
+    (:encryption-change
+     (process-encryption-change hci packet))
+     ))
 
 (defun process-hci (hci packet)
   (log-trace (format nil "PROCESS-HCI ~X" packet))
@@ -2639,17 +2738,25 @@
    (log-inf "================ enter ===============")
    (log-inf (format nil "Our table: ~A~%" (gattc-print *gatts-table*)))
 
-   (setf (get-smp-context) '())
-   ;; (setf *bonds* (make-hash-table))     ; comment to persist the bonds
+   (setf *bonds* (make-hash-table))     ; comment to persist the bonds
 
    (init-controller hci)
-   (start-advertising hci (list
-                           (make-ad :flags '(#x01)) ; LE General discoverable
-                           (make-ad-name "lhost")))
+
+   (hci-set-scan-param hci)
+   (hci-set-scan-enable hci t)
 
    (let ((conn-handle)
          ;; Shadow active-conns
-         (*active-conns* '()))
+         (*active-conns* '())
+         (gatts-hr-handle
+           (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+))
+         (address (wait-for-scan-report hci (lambda (x) (name? "Hello!" x)))))
+
+     (hci-set-scan-enable hci nil)
+     (hci-create-connection hci (copy-tree address))
+
+     (format t "CCCD before: ~X~%"
+             (read-cccd conn-handle *gatts-table* gatts-hr-handle))
 
      (log-inf (format nil "Wait for connection"))
      (let ((conn-evt (wait-for-conn hci)))
@@ -2659,11 +2766,11 @@
        (setf (getf (getf *active-conns* conn-handle) :address)
              (getf conn-evt :address)))
 
-     (log-inf (format nil "Wait for link encryption"))
-     (wait-for-encryption hci conn-handle)
+     (setf (get-smp-context conn-handle) '())
 
-     (log-inf "Upgrading MTU..")
-     (log-inf (format nil "Negotiated MTU ~A" (att-set-mtu hci conn-handle 255)))
+     ;; Start pairing
+     (smp-send-pairing-req hci conn-handle)
+     (wait-for-encryption hci conn-handle)
 
      (log-inf "Discovering peer table")
      (let ((gattc-table (gattc-discover hci conn-handle)))
@@ -2671,9 +2778,20 @@
        (setf *test* gattc-table)
        (log-inf (format nil "Read GAP Device Name: ~A"
                         (from-c-string
-                         (read-gap-name hci conn-handle gattc-table)))))
+                         (read-gap-name hci conn-handle gattc-table))))
+
+       (log-inf "Subscribing")
+       (gattc-subscribe hci conn-handle gattc-table
+                        +gatt-uuid-heart-rate-measurement+))
 
      (log-inf (format nil "Active conns: ~X" *active-conns*))
+
+     ;; Sleep for a while, but still process packets
+     (loop for i from 0 to 10 do
+       (progn
+         (drain-rxq hci)
+         (do-idle-work hci)
+         (sleep .1)))
 
      (log-inf (format nil "Disconnecting from conn-handle ~A" conn-handle))
      (hci-disconnect hci conn-handle)
@@ -2688,6 +2806,9 @@
 
 ;; TODO:
 ;; - REPL usage
+;; - clone GATT table
+;; - central pairing
+;; - MITM for JW
 ;;
 ;; Okay so here's what we really need:
 ;;
