@@ -1979,6 +1979,9 @@
     :address)
    :address))                           ; yo dawg i herd you liked address
 
+(defun encrypted? (conn)
+  (getf (get-smp-context conn) :encrypted))
+
 ;; cccd storage is just a plist (address . value)
 (defun make-cccd-storage ()
   (let ((cccd-db))
@@ -1987,12 +1990,21 @@
      :read
      (lambda (conn handle)
        (declare (ignore handle))
-       (getf cccd-db (get-address conn)))
+       (if (encrypted? conn)
+        (getf cccd-db (get-address conn))
+        :insufficient-authentication))
 
      :write
      (lambda (conn handle value)
        (declare (ignore handle))
-       (setf (getf cccd-db (get-address conn)) value)))))
+       (if (encrypted? conn)
+        (progn
+          (setf (getf cccd-db (get-address conn)) value)
+          nil)
+        (progn
+          (log-err (format nil "CCCD write error: ~A" :insufficient-authentication))
+          :insufficient-authentication)))
+     )))
 
 (defconstant +gatt-uuid-gatt-service+ #x1801)
 (defconstant +gatt-uuid-gatt-service-changed+ #x2A05)
@@ -2027,13 +2039,17 @@
    ))
 
 (defun read-cccd (conn table value-handle)
-  (let ((cccd-handle
-          (gattc-find-cccd-handle table +gatt-uuid-cccd+ value-handle)))
-    (when cccd-handle
-      (funcall
-       (getf (nth (- cccd-handle 1) table) :read)
-       conn
-       cccd-handle))))
+  (let* ((cccd-handle
+          (gattc-find-cccd-handle table +gatt-uuid-cccd+ value-handle))
+         (cccd-value (when cccd-handle
+                       (funcall
+                        (getf (nth (- cccd-handle 1) table) :read)
+                        conn
+                        cccd-handle))))
+    (unless (listp cccd-value)
+      (log-err (format nil "CCCD error: ~A" cccd-value)))
+    (when (listp cccd-value)
+      cccd-value)))
 
 (gattc-print *gatts-table*)
 ;  => "
@@ -2179,17 +2195,33 @@
     (gatts-find-info-rsp *gatts-table* start end)))
 
 (defun gatts-process-write (conn req)
-  (let* ((handle (pull-int req :u16)))
+  (let* ((handle (pull-int req :u16))
+         (rsp (funcall
+               (getf (nth (- handle 1) *gatts-table*) :write)
+               conn handle req)))
     (log-dbg (format nil "WRITE-REQ handle ~X" handle))
-    (funcall (getf (nth (- handle 1) *gatts-table*) :write) conn handle req)
-    (att-make-packet :write-rsp '())))
+    (if rsp
+        (att-make-packet :error-rsp
+                         (append
+                          (att-make-opcode :write-req)
+                          (make-c-int :u16 handle)
+                          (make-c-int :u8 (att-make-error rsp))))
+        (att-make-packet :write-rsp nil))))
 
 (defun gatts-process-read (conn req)
-  (let* ((handle (pull-int req :u16)))
+  (let* ((handle (pull-int req :u16))
+         (rsp (funcall
+               (getf (nth (- handle 1) *gatts-table*) :read)
+               conn handle)))
     (log-dbg (format nil "READ-REQ handle ~X" handle))
-    (att-make-packet
-     :read-rsp
-     (funcall (getf (nth (- handle 1) *gatts-table*) :read) conn handle))))
+    (if (listp rsp)
+        (att-make-packet :read-rsp rsp)
+        (att-make-packet :error-rsp
+                         (append
+                          (att-make-opcode :write-req)
+                          (make-c-int :u16 handle)
+                          (make-c-int :u8 (att-make-error rsp)))))))
+
 
 (defun handle-att (hci conn req)
   (let* ((op (pull-int req :u8))
