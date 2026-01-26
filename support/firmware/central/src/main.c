@@ -103,9 +103,9 @@ static uint8_t discover_func(struct bt_conn *conn,
 
 	printk("[ATTRIBUTE] handle %u\n", attr->handle);
 
-	if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_NUS_SERVICE)) {
+	if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_HRS)) {
 		printk("found service decl\n");
-		memcpy(&discover_uuid, BT_UUID_NUS_TX_CHAR, sizeof(discover_uuid));
+		memcpy(&discover_uuid, BT_UUID_HRS_MEASUREMENT, sizeof(discover_uuid));
 		discover_params.uuid = &discover_uuid.uuid;
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
@@ -115,7 +115,7 @@ static uint8_t discover_func(struct bt_conn *conn,
 			printk("Discover failed (err %d)\n", err);
 		}
 	} else if (!bt_uuid_cmp(discover_params.uuid,
-				BT_UUID_NUS_TX_CHAR)) {
+				BT_UUID_HRS_MEASUREMENT)) {
 		printk("found char decl\n");
 		memcpy(&discover_uuid, BT_UUID_GATT_CCC, sizeof(discover_uuid));
 		discover_params.uuid = &discover_uuid.uuid;
@@ -149,7 +149,7 @@ static uint8_t discover_func(struct bt_conn *conn,
 static void start_discovery(void) {
 	printk("########################################\n");
 	printk("START DISCOVERY\n");
-	memcpy(&discover_uuid, BT_UUID_NUS_SERVICE, sizeof(discover_uuid));
+	memcpy(&discover_uuid, BT_UUID_HRS, sizeof(discover_uuid));
 	discover_params.uuid = &discover_uuid.uuid;
 	discover_params.func = discover_func;
 	discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
@@ -339,6 +339,10 @@ static struct bt_conn_auth_info_cb auth_cb_info = {
 int main(void)
 {
 	int err;
+
+	/* [drake-no.jpg] Parse adv-name?
+     * [drake-yes.jpg] Build sample on a race condition */
+	k_sleep(K_SECONDS(2));
 
 	err = bt_enable(NULL);
 	if (err) {

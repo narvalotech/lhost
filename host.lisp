@@ -1367,6 +1367,8 @@
          packet)))
 
 (defun l2cap-send (hci conn-handle channel packet)
+  (unless conn-handle
+    (error "conn handle is nil"))
   (hci-send-acl
    hci
    conn-handle
@@ -2229,29 +2231,75 @@
   ;; Don't reply to notifications
   nil)
 
+(defparameter *mitm* nil)
+(defun start-mitm (central-conn peripheral-conn)
+  (setf *mitm*
+      (list
+       :central central-conn
+       :peripheral peripheral-conn
+       :ready nil)))
+
+(defparameter *mitm-att-queue* '())
+(defun disable-mitm ()
+  (setf *mitm-att-queue* nil)
+  (setf *mitm* nil))
+
+(defun arm-mitm ()
+  (setf *mitm* (list :armed t)))
+
+(defun mitm-switcheroo (conn)
+  (if *mitm*
+      (if (equal conn (getf *mitm* :central))
+          (getf *mitm* :peripheral)
+          (getf *mitm* :central))
+      conn))
+
+(defun handle-att-mitm (hci conn req)
+  (if (not (getf *mitm* :ready))
+      (push (list :conn conn :req req) *mitm-att-queue*)
+      (let ((other-conn
+              (if (equal conn (getf *mitm* :central))
+                  (getf *mitm* :peripheral)
+                  (getf *mitm* :central))))
+        (log-dbg (format nil "MITM [~A -> ~A] ~X"
+                         conn other-conn req))
+        (att-send hci other-conn req))))
+
+(defun drain-mitm-att-queue (hci)
+  (setf (getf *mitm* :ready) t)
+  (mapcar (lambda (packet)
+            (handle-att-mitm hci
+                             (getf packet :conn)
+                             (getf packet :req)))
+          *mitm-att-queue*)
+  (setf *mitm-att-queue* nil))
+
 (defun handle-att (hci conn req)
-  (let* ((op (pull-int req :u8))
-         (op-name (plist-key +att-opcodes+ op)))
-    (log-dbg (format nil "ATT-RX: OP ~X DATA ~X" op-name req))
-    (att-send
-     hci conn
-     (case op-name
-       (:find-by-type-value-req
-        (gatts-process-find-by-type-value conn req))
-       (:read-by-type-req
-        (gatts-process-read-by-type conn req))
-       (:find-information-req
-        (gatts-process-find-information conn req))
-       (:write-req
-        (gatts-process-write conn req))
-       (:read-req
-        (gatts-process-read conn req))
-       (:read-by-group-type-req
-        (gatts-process-read-by-group-type conn req))
-       (:handle-value-ntf
-        (gattc-process-notification conn req))
-       (t
-        (att-error-rsp op-name 0 :request-not-supported))))))
+  (if *mitm*
+      (handle-att-mitm hci conn req)
+      (let* ((op (pull-int req :u8))
+             (op-name (plist-key +att-opcodes+ op)))
+        ;; TODO: log conn in ATT/SMP RX/TX
+        (log-dbg (format nil "ATT-RX: OP ~X DATA ~X" op-name req))
+        (att-send
+         hci conn
+         (case op-name
+           (:find-by-type-value-req
+            (gatts-process-find-by-type-value conn req))
+           (:read-by-type-req
+            (gatts-process-read-by-type conn req))
+           (:find-information-req
+            (gatts-process-find-information conn req))
+           (:write-req
+            (gatts-process-write conn req))
+           (:read-req
+            (gatts-process-read conn req))
+           (:read-by-group-type-req
+            (gatts-process-read-by-group-type conn req))
+           (:handle-value-ntf
+            (gattc-process-notification conn req))
+           (t
+            (att-error-rsp op-name 0 :request-not-supported)))))))
 
 (defun wait-for-att-request (hci conn)
   ;; Wait for the next ATT request
@@ -2320,8 +2368,11 @@
 
 (defparameter *smp-context* (make-hash-table))
 
-(defmacro get-smp-context (conn)
-  `(gethash ,conn *smp-context*))
+(defun get-smp-context (conn)
+  (gethash conn *smp-context*))
+
+(defun (setf get-smp-context) (new-value conn)
+  (setf (gethash conn *smp-context*) new-value))
 
 (defun smp-make-opcode (op-name &optional single)
   (if (not single)
@@ -2386,6 +2437,12 @@
 
 (defconstant +our-iocap+ '(#x03 #x00 #x09))
 
+(defun smp-send-security-req (hci conn)
+  (smp-send
+   hci conn (smp-make-packet
+             :security-request
+             (make-c-int :u8 #x09))))
+
 (defun smp-send-pairing-req (hci conn)
   (let* ((iocap +iocap-no-display-no-keyboard+)
          (oob-flag #x00)                ; no OOB
@@ -2402,7 +2459,7 @@
 
     ;; Reset the SMP context upon sending Pairing Request
     (setf (get-smp-context conn)
-          (list :random (make-list 16 :initial-element 99) ; technically random
+          (list :random-central (make-list 16 :initial-element 99) ; technically random
                 :our-privkey (smp-make-privkey)))
 
     (smp-send
@@ -2424,7 +2481,6 @@
     (smp-make-packet :pairing-public-key (smp-get-privkey conn))))
 
 (defun smp-process-pairing-req (conn data)
-  (declare (ignore conn))
   (let* ((iocap (pull-int data :u8))
          (oob-flag (pull-int data :u8))
          (authreq (pull-int data :u8))
@@ -2442,7 +2498,7 @@
     ;; Reset the SMP context upon receiving Pairing Request
     (setf (get-smp-context conn)
           (list :iocap (list iocap oob-flag authreq)
-                :random (make-list 16 :initial-element 77) ; technically random
+                :random-peripheral (make-list 16 :initial-element 77) ; technically random
                 :our-privkey (smp-make-privkey)))
 
     (smp-make-packet
@@ -2487,11 +2543,12 @@
   (smp-cmac X U V Z))
 
 (defun smp-send-pairing-confirm (hci conn)
+  ;; Only sent as non-initiating device (peripheral)
   (smp-send
    hci conn
    (smp-make-packet
     :pairing-confirm
-    (let* ((nb (getf (get-smp-context conn) :random)) ; technically random
+    (let* ((nb (getf (get-smp-context conn) :random-peripheral))
            (pk-b-x (subseq (smp-get-our-pubkey conn) 0 32))
            (pk-a-x (subseq (getf (get-smp-context conn) :peer-pubkey) 0 32))
            (confirm-b (smp-f4 pk-b-x pk-a-x nb (make-c-int :u8 0))))
@@ -2503,7 +2560,7 @@
   (declare (ignore data))
   ;; next step is sending our random
   (smp-make-packet :pairing-random
-                   (getf (get-smp-context conn) :random)))
+                   (getf (get-smp-context conn) :random-central)))
 
 (defun smp-send-dhkey-check-ea (hci conn)
   (let* ((dhkey-check-Ea (smp-compute-dhkey-check conn :Ea t)))
@@ -2515,21 +2572,23 @@
   (let* ((peer-random data))
 
     ;; (log-dbg (format nil "SMP: peer random ~X" peer-random))
-    (setf (getf (get-smp-context conn) :peer-random) peer-random)
-
     (if (getf (get-smp-context conn) :initiated-by-us)
-        nil
-        (smp-make-packet :pairing-random
-                         (getf (get-smp-context conn) :random)))))
+        (progn
+          (setf (getf (get-smp-context conn) :random-peripheral) peer-random)
+          nil)
+        (progn
+          (setf (getf (get-smp-context conn) :random-central) peer-random)
+          (smp-make-packet :pairing-random
+                           (getf (get-smp-context conn) :random-peripheral))))))
 
 (defun smp-f6 (W N1 N2 R IOcap A1 A2)
-  ;; (log-dbg (format nil "SMP: f6: W ~X" W))
-  ;; (log-dbg (format nil "SMP: f6: N1 ~X" N1))
-  ;; (log-dbg (format nil "SMP: f6: N2 ~X" N2))
-  ;; (log-dbg (format nil "SMP: f6: A1 ~X" A1))
-  ;; (log-dbg (format nil "SMP: f6: A2 ~X" A2))
-  ;; (log-dbg (format nil "SMP: f6: R ~X" R))
-  ;; (log-dbg (format nil "SMP: f6: iocap ~X" IOcap))
+  (log-dbg (format nil "SMP: f6: W ~X" W))
+  (log-dbg (format nil "SMP: f6: N1 ~X" N1))
+  (log-dbg (format nil "SMP: f6: N2 ~X" N2))
+  (log-dbg (format nil "SMP: f6: A1 ~X" A1))
+  (log-dbg (format nil "SMP: f6: A2 ~X" A2))
+  (log-dbg (format nil "SMP: f6: R ~X" R))
+  (log-dbg (format nil "SMP: f6: iocap ~X" IOcap))
   (smp-cmac W N1 N2 R IOcap A1 A2))
 
 (defun smp-addr (conn &key peer)
@@ -2540,19 +2599,28 @@
      (make-uint 6 (getf address :address))
      (make-uint 1 (logand (getf address :type) #x01)))))
 
+(defun smp-addr-central (conn)
+  (if (getf (get-smp-context conn) :initiated-by-us)
+      (smp-addr conn)
+      (smp-addr conn :peer t)))
+
+(defun smp-addr-peripheral (conn)
+  (if (getf (get-smp-context conn) :initiated-by-us)
+      (smp-addr conn :peer t)
+      (smp-addr conn)))
+
 (defun smp-compute-dhkey-check (conn &key Ea)
   ;; [v5.4 p1556] Calculate Ea/Eb
   (let* ((mackey (getf (get-smp-context conn) :mackey))
-         (Na (getf (get-smp-context conn) (if Ea :random :peer-random)))
-         (Nb (getf (get-smp-context conn) (if Ea :peer-random :random)))
+         (Na (getf (get-smp-context conn) :random-central))
+         (Nb (getf (get-smp-context conn) :random-peripheral))
          (r (make-list 16 :initial-element 0))
-         (IOcapB +our-iocap+)
-         (IOcapA (getf (get-smp-context conn) :iocap))
-         (addr-a-c (smp-addr conn :peer t))
-         (addr-b-p (smp-addr conn)))
+         (IOcap +our-iocap+)            ; it's always our iocap
+         (addr-a-c (smp-addr-central conn))
+         (addr-b-p (smp-addr-peripheral conn)))
     (if Ea
-        (smp-f6 mackey Na Nb r IOcapA addr-b-p addr-a-c)
-        (smp-f6 mackey Nb Na r IOcapB addr-b-p addr-a-c))))
+        (smp-f6 mackey Na Nb r IOcap addr-a-c addr-b-p)
+        (smp-f6 mackey Nb Na r IOcap addr-b-p addr-a-c))))
 
 (defun smp-process-dhkey-check (conn data)
   (let* ((peer-dhkey-check data)
@@ -2594,34 +2662,41 @@
                         A2
                         (make-c-int :u16 256))))
 
-    ;; (log-dbg (format nil "SMP: f5: T ~X" key-T))
-    ;; (log-dbg (format nil "SMP: f5: N1 ~X" N1))
-    ;; (log-dbg (format nil "SMP: f5: N2 ~X" N2))
-    ;; (log-dbg (format nil "SMP: f5: A1 ~X" A1))
-    ;; (log-dbg (format nil "SMP: f5: A2 ~X" A2))
-    ;; (log-dbg (format nil "SMP: f5: mc ~X" mackey))
-    ;; (log-dbg (format nil "SMP: f5: ltk ~X" ltk))
+    (log-dbg (format nil "SMP: f5: T ~X" key-T))
+    (log-dbg (format nil "SMP: f5: N1 ~X" N1))
+    (log-dbg (format nil "SMP: f5: N2 ~X" N2))
+    (log-dbg (format nil "SMP: f5: A1 ~X" A1))
+    (log-dbg (format nil "SMP: f5: A2 ~X" A2))
+    (log-dbg (format nil "SMP: f5: mc ~X" mackey))
+    (log-dbg (format nil "SMP: f5: ltk ~X" ltk))
 
     (append mackey ltk)))
 
 (defun smp-compute-and-store-ltk (conn)
-  (let* ((Np (getf (get-smp-context conn) :random))
-         (Nc (getf (get-smp-context conn) :peer-random))
-         (addr-a-c (smp-addr conn :peer t))
-         (addr-b-p (smp-addr conn))
+  (let* ((Nb (getf (get-smp-context conn) :random-peripheral))
+         (Na (getf (get-smp-context conn) :random-central))
+         (addr-a-c (smp-addr-central conn))
+         (addr-b-p (smp-addr-peripheral conn))
          (dhkey (smp-dhkey conn))
-         (f5-out (smp-f5 dhkey Nc Np addr-a-c addr-b-p))
+         (f5-out (smp-f5 dhkey Na Nb addr-a-c addr-b-p))
          (mackey (subseq f5-out 0 16))
          (ltk (subseq f5-out 16 32)))
-    ;; (log-dbg (format nil "SMP: dhkey ~X" dhkey))
-    ;; (log-dbg (format nil "SMP: ltk ~X" ltk))
-    ;; (log-dbg (format nil "SMP: mackey ~X" mackey))
+    (log-dbg (format nil "SMP: dhkey ~X" dhkey))
+    (log-dbg (format nil "SMP: ltk ~X" ltk))
+    (log-dbg (format nil "SMP: mackey ~X" mackey))
     (setf (getf (get-smp-context conn) :ltk) ltk)
     (setf (getf (get-smp-context conn) :mackey) mackey)))
 
+(defun enc-change? (evt-code)
+  (lambda (packet)
+    (eql (car (cadr packet)) evt-code)))
+
 (defun wait-for-encryption (hci conn)
-  (declare (ignore conn))
-  (receive-if hci (evt? :encryption-change))
+  (receive-if hci
+              (lambda (packet)
+                (and
+                 (eql (car (cadr packet)) :encryption-change)
+                 (eql (getf (cadr (cadr packet)) :handle) conn))))
   (setf (getf (get-smp-context conn) :encrypted) t))
 
 (defun provide-ltk (hci conn ltk)
@@ -2662,6 +2737,15 @@
                   (get-ltk conn))))
     (provide-ltk hci conn ltk)))
 
+(defun smp-process-security-req (conn data)
+  (declare (ignore conn data))
+  nil)
+
+(defun smp-process-pairing-failed (conn data)
+  (declare (ignore data))
+  (log-inf (format nil "PAIRING FAILED (conn ~A)" conn))
+  nil)
+
 (defun handle-smp (hci conn packet)
   (let* ((data (getf packet :data))
          (opcode (pull-int data :u8))
@@ -2670,6 +2754,10 @@
     (smp-send
      hci conn
      (ecase op-name
+       (:pairing-failed
+        (smp-process-pairing-failed conn data))
+       (:security-request
+        (smp-process-security-req conn data))
        (:pairing-request
         (smp-process-pairing-req conn data))
        (:pairing-response
@@ -2693,7 +2781,9 @@
         (smp-send-pairing-confirm hci conn)))
 
     (unless (getf (get-smp-context conn) :ltk)
-      (when (getf (get-smp-context conn) :peer-random)
+      (when (and
+             (getf (get-smp-context conn) :random-peripheral)
+             (getf (get-smp-context conn) :random-central))
         (smp-compute-and-store-ltk conn)
 
         (when (getf (get-smp-context conn) :initiated-by-us)
@@ -2719,7 +2809,6 @@
     ))
 
 (defun handle-acl (hci packet)
-  ;; TODO per-conn handling
   ;; For some weird reason (probably pebcak) CASE doesn't work with constants.
   (cond
     ((eql (getf packet :channel) +l2cap-att-chan+)
@@ -2779,62 +2868,84 @@
    (log-inf (format nil "Our table: ~A~%" (gattc-print *gatts-table*)))
 
    (setf *bonds* (make-hash-table))     ; comment to persist the bonds
+   (disable-mitm)
+   (arm-mitm)
 
    (init-controller hci)
 
    (hci-set-scan-param hci)
    (hci-set-scan-enable hci t)
 
-   (let ((conn-handle)
+   (let ((conn-peripheral)
+         (conn-central)
          ;; Shadow active-conns
          (*active-conns* '())
-         (gatts-hr-handle
-           (gatt-find-handle *gatts-table* +gatt-uuid-heart-rate-measurement+))
          (address (wait-for-scan-report hci (lambda (x) (name? "Hello!" x)))))
 
+     (log-inf "#######################################")
+     (log-inf (format nil "Wait for connection to peripheral"))
      (hci-set-scan-enable hci nil)
      (hci-create-connection hci (copy-tree address))
 
-     (format t "CCCD before: ~X~%"
-             (read-cccd conn-handle *gatts-table* gatts-hr-handle))
-
-     (log-inf (format nil "Wait for connection"))
      (let ((conn-evt (wait-for-conn hci)))
-       (setf conn-handle (getf conn-evt :handle))
-       (setf (getf (getf *active-conns* conn-handle) :our-address)
+       (setf conn-peripheral (getf conn-evt :handle))
+       (setf (getf (getf *active-conns* conn-peripheral) :our-address)
              (make-address (getf hci :random-address) #x01))
-       (setf (getf (getf *active-conns* conn-handle) :address)
+       (setf (getf (getf *active-conns* conn-peripheral) :address)
              (getf conn-evt :address)))
 
-     (setf (get-smp-context conn-handle) '())
+     (setf (get-smp-context conn-peripheral) '())
 
-     ;; Start pairing
-     (smp-send-pairing-req hci conn-handle)
-     (wait-for-encryption hci conn-handle)
+     (log-inf "#######################################")
+     (log-inf (format nil "Wait for connection to central"))
 
-     (log-inf "Discovering peer table")
-     (let ((gattc-table (gattc-discover hci conn-handle)))
-       (log-inf (format nil "Discovered: ~A~%" (gattc-print gattc-table)))
-       (setf *test* gattc-table)
-       (log-inf (format nil "Read GAP Device Name: ~A"
-                        (from-c-string
-                         (read-gap-name hci conn-handle gattc-table))))
+     (start-advertising hci (list
+                             (make-ad :flags '(#x01)) ; LE General discoverable
+                             (make-ad-name "lhost")))
 
-       (log-inf "Subscribing")
-       (gattc-subscribe hci conn-handle gattc-table
-                        +gatt-uuid-heart-rate-measurement+))
+     (let ((conn-evt (wait-for-conn hci)))
+       (setf conn-central (getf conn-evt :handle))
+       (setf (getf (getf *active-conns* conn-central) :our-address)
+             (make-address (getf hci :random-address) #x01))
+       (setf (getf (getf *active-conns* conn-central) :address)
+             (getf conn-evt :address)))
+
+     (setf (get-smp-context conn-central) '())
+
+     ;; Pair peripheral
+     (log-inf "#######################################")
+     (log-inf "Pairing peripheral")
+     (smp-send-pairing-req hci conn-peripheral)
+     (wait-for-encryption hci conn-peripheral)
+
+     ;; Pair central
+     (log-inf "#######################################")
+     (log-inf "Pairing central")
+     (smp-send-security-req hci conn-central)
+     (wait-for-encryption hci conn-central)
+
+     ;; Process backed-up ATT packets
+     (log-inf "#######################################")
+     (log-inf "Drain queue")
+     (start-mitm conn-central conn-peripheral)
+     (drain-mitm-att-queue hci)
+
+     ;; At this point, ATT packets are transmitted to the other
+     ;; connection.
 
      (log-inf (format nil "Active conns: ~X" *active-conns*))
 
+     (log-inf "#######################################")
+
      ;; Sleep for a while, but still process packets
-     (loop for i from 0 to 10 do
+     (loop for i from 0 to 100 do
        (progn
          (drain-rxq hci)
          (do-idle-work hci)
          (sleep .1)))
 
-     (log-inf (format nil "Disconnecting from conn-handle ~A" conn-handle))
-     (hci-disconnect hci conn-handle)
+     (log-inf (format nil "Disconnecting from conn-peripheral ~A" conn-peripheral))
+     (hci-disconnect hci conn-peripheral)
      (wait-for-disconn hci)
      )
 

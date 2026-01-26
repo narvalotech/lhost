@@ -14,7 +14,7 @@ mkfifo ${uart_c2h}
 set -eu
 
 this_dir=$(west topdir)/lhost/support
-central="${this_dir}/firmware/peripheral/build/zephyr/zephyr.exe"
+peripheral="${this_dir}/firmware/peripheral/build/zephyr/zephyr.exe"
 
 # Cleanup all existing sims
 ${BSIM_COMPONENTS_PATH}/common/stop_bsim.sh
@@ -28,14 +28,19 @@ pushd "${BSIM_COMPONENTS_PATH}/device_handbrake"
 ./bs_device_handbrake -s=lisp-id -d=2 -r=1 &
 
 # This talks to the lisp program
-hci_uart="${this_dir}/firmware/hci_sim/build/zephyr/zephyr.exe"
-$hci_uart \
-    -s=lisp-id -d=1 -RealEncryption=0 -rs=70 \
-    -fifo_0_rx=${uart_h2c} \
-    -fifo_0_tx=${uart_c2h} &
+# hci_uart="${this_dir}/firmware/hci_sim/build/zephyr/zephyr.exe"
+# $hci_uart \
+#     -s=lisp-id -d=1 -RealEncryption=0 -rs=70 \
+#     -fifo_0_rx=${uart_h2c} \
+#     -fifo_0_tx=${uart_c2h} &
 
-echo "Start debug server on central device"
-gdbserver :2345 $central -s=lisp-id -d=0 &
+
+# Start central
+central_exe="${this_dir}/firmware/central/build/zephyr/zephyr.exe"
+$central_exe -s=lisp-id -d=1 -RealEncryption=0 -rs=788 &
+
+echo "Start debug server on peripheral device"
+gdbserver :2345 $peripheral -s=lisp-id -d=0 &
 
 # Give some time for server to start up
 sleep 0.5
