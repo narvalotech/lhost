@@ -2,7 +2,7 @@
 
 (require 'sb-posix)
 
-;;;;;;;;;;;;; general utils
+;;;;;;;;;;;;; logging
 
 (ql:quickload :local-time)
 (ql:quickload :bordeaux-threads)
@@ -39,6 +39,12 @@
 (defun log-err (message) (poor-mans-log :err message))
 
 ;;;;;;;;;;;;; general utils
+
+(defun px (l)
+  (format nil "~{~2,'0X~^ ~}" l))
+
+(defun pxx (l)
+  (format nil "0x~{~2,'0X~}" l))
 
 (defconstant +u64-max+ (ldb (byte 64 0) -1))
 
@@ -2402,8 +2408,18 @@
 
 (ql:quickload 'ironclad)
 
+(defparameter *testkey* nil)
+;; (defparameter *testkey* (ironclad:generate-key-pair :SECP256R1))
+
 (defun smp-make-privkey ()
-  (ironclad:generate-key-pair :SECP256R1))
+  (if *testkey*
+      *testkey*
+      (ironclad:generate-key-pair :SECP256R1)))
+
+;; (pxx
+;;  (coerce (getf
+;;           (ironclad:destructure-private-key *testkey*) :x) 'list))
+;;  ; => "0xC4DE2220375311EFEB2AEDDE611D8B2B59D8AFD7F3339BF1F34D682FE03ED5E0"
 
 (defun smp->ironclad (pubkey)
   (ironclad:make-public-key
@@ -2718,6 +2734,8 @@
   (setf (getf (get-smp-context conn) :encrypted) t))
 
 (defun provide-ltk (hci conn ltk)
+  (unless ltk
+    (error "cant find LTK"))
   (log-dbg (format nil "ENCRYPTION: providing LTK ~X" ltk))
   (hci-send-cmd
    hci
@@ -2742,7 +2760,7 @@
         :ltk ltk))
 
 (defun is-bonded (address)
-  (gethash (getf address :address) *bonds*))
+  (gethash address *bonds*))
 
 (defun get-ltk (conn)
   (getf
@@ -2826,7 +2844,18 @@
                          :ltk (getf (get-smp-context conn) :ltk))))))
     ))
 
-(defconstant +l2cap-le-signalling-chan+ #x0005)
+(defun encrypt-link (hci conn)
+  (let ((ltk (if (is-bonded (get-address conn))
+                 (get-ltk conn)
+                 (getf (get-smp-context conn) :ltk))))
+    (log-inf (format nil "Encrypting with LTK ~X" ltk))
+    (hci-send-cmd
+     hci
+     (make-hci-cmd :le-enable-encryption
+                   :handle conn
+                   :rand 0
+                   :ediv 0
+                   :ltk ltk))))
 
 (defconstant +l2cap-le-signalling-chan+ #x0005)
 (defconstant +l2cap-conn-param-update-req+ #x13)
@@ -2941,6 +2970,13 @@
   (hci-set-adv-param hci)
   (hci-set-adv-data hci adv-data)
   (hci-set-adv-enable t hci))
+
+(defun start-security (hci conn &key is-peripheral)
+  (if is-peripheral
+      (smp-send-security-req hci conn)
+      (if (is-bonded (get-address conn))
+          (encrypt-link hci conn)
+          (smp-send-pairing-req hci conn))))
 
 (time
  (with-hci hci *h2c-path* *c2h-path*
