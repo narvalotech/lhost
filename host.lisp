@@ -356,6 +356,15 @@
      (:status :u8
       :conn-handle :u16))
 
+    :le-conn-update
+    (#x2013 (:handle :u16
+             :interval-min :u16
+             :interval-max :u16
+             :max-latency :u16
+             :timeout :u16
+             :min-ce-len :u16
+             :max-ce-len :u16))
+
     ))
 
 (getf *hci-cmds* :write-default-data-length)
@@ -508,11 +517,22 @@
     :max-latency (pull-int payload :u16)
     :timeout (pull-int payload :u16))))
 
+(defun decode-le-conn-update (payload)
+  (list
+   :le-conn-update
+   (list
+    :status (pull-int payload :u8)
+    :conn-handle (pull-int payload :u16)
+    :interval (pull-int payload :u16)
+    :latency (pull-int payload :u16)
+    :timeout (pull-int payload :u16))))
+
 (defun decode-le-meta (payload)
   (let ((sub (pull-int payload :u8)))
     (case sub
       (#x01 (decode-conn-complete payload))
       (#x02 (decode-adv-report payload))
+      (#x03 (decode-le-conn-update payload))
       (#x05 (decode-le-ltk-request payload))
       (#x06 (decode-le-remote-conn-param-req payload))
       (#x0A (decode-enh-conn-complete payload))
@@ -1369,13 +1389,14 @@
 (defun l2cap-send (hci conn-handle channel packet)
   (unless conn-handle
     (error "conn handle is nil"))
-  (hci-send-acl
-   hci
-   conn-handle
-   (append
-    (make-c-int :u16 (length packet))
-    (make-c-int :u16 channel)
-    packet)))
+  (when packet
+    (hci-send-acl
+     hci
+     conn-handle
+     (append
+      (make-c-int :u16 (length packet))
+      (make-c-int :u16 channel)
+      packet))))
 
 (defconstant +l2cap-att-chan+ #x0004)
 
@@ -2240,30 +2261,27 @@
        :ready nil)))
 
 (defparameter *mitm-att-queue* '())
+(defparameter *mitm-signalling-queue* '())
 (defun disable-mitm ()
   (setf *mitm-att-queue* nil)
+  (setf *mitm-signalling-queue* nil)
   (setf *mitm* nil))
 
 (defun arm-mitm ()
   (setf *mitm* (list :armed t)))
 
-(defun mitm-switcheroo (conn)
-  (if *mitm*
-      (if (equal conn (getf *mitm* :central))
-          (getf *mitm* :peripheral)
-          (getf *mitm* :central))
-      conn))
+(defun mitm-other-conn (conn)
+  (if (equal conn (getf *mitm* :central))
+      (getf *mitm* :peripheral)
+      (getf *mitm* :central)))
 
 (defun handle-att-mitm (hci conn req)
   (if (not (getf *mitm* :ready))
       (push (list :conn conn :req req) *mitm-att-queue*)
-      (let ((other-conn
-              (if (equal conn (getf *mitm* :central))
-                  (getf *mitm* :peripheral)
-                  (getf *mitm* :central))))
+      (progn
         (log-dbg (format nil "MITM [~A -> ~A] ~X"
-                         conn other-conn req))
-        (att-send hci other-conn req))))
+                         conn (mitm-other-conn conn) req))
+        (att-send hci (mitm-other-conn conn) req))))
 
 (defun drain-mitm-att-queue (hci)
   (setf (getf *mitm* :ready) t)
@@ -2808,6 +2826,46 @@
                          :ltk (getf (get-smp-context conn) :ltk))))))
     ))
 
+(defconstant +l2cap-le-signalling-chan+ #x0005)
+
+(defconstant +l2cap-le-signalling-chan+ #x0005)
+(defconstant +l2cap-conn-param-update-req+ #x13)
+
+(defun handle-signalling-mitm (hci conn data)
+  (if (not (getf *mitm* :ready))
+      (push (list :conn conn :data data) *mitm-signalling-queue*)
+      (progn
+        (log-inf (format nil "SIGNALLING PACKET: conn ~A data ~X" conn data))
+        (log-dbg (format nil "MITM [~A -> ~A] ~X"
+                         conn (mitm-other-conn conn) data))
+        (l2cap-send hci (mitm-other-conn conn) +l2cap-le-signalling-chan+
+                    (getf data :data)))))
+
+(defun handle-signalling (hci conn data)
+  (if *mitm*
+      (handle-signalling-mitm hci conn data)
+      (let* ((payload (getf data :data))
+             (opcode (pull-int payload :u8))
+             (identifier (pull-int payload :u8)))
+        (log-inf (format nil "SIGNALLING PACKET: conn ~A op ~X payload ~X" opcode conn payload))
+        (l2cap-send hci conn +l2cap-le-signalling-chan+
+                    (ecase opcode
+                      (+l2cap-conn-param-update-req+
+                       (append
+                        (make-c-int :u8 +l2cap-conn-param-update-req+)
+                        (make-c-int :u8 identifier)
+                        (make-c-int :u16 #x2)
+                        (make-c-int :u16 #x0001)))))))) ; rejecc
+
+(defun drain-mitm-signalling-queue (hci)
+  (setf (getf *mitm* :ready) t)
+  (mapcar (lambda (packet)
+            (handle-signalling hci
+                               (getf packet :conn)
+                               (getf packet :data)))
+          *mitm-signalling-queue*)
+  (setf *mitm-signalling-queue* nil))
+
 (defun handle-acl (hci packet)
   ;; For some weird reason (probably pebcak) CASE doesn't work with constants.
   (cond
@@ -2815,6 +2873,8 @@
      (handle-att hci (getf packet :conn-handle) (getf packet :data)))
     ((eql (getf packet :channel) +l2cap-smp-chan+)
      (handle-smp hci (getf packet :conn-handle) packet))
+    ((eql (getf packet :channel) +l2cap-le-signalling-chan+)
+     (handle-signalling hci (getf packet :conn-handle) packet))
     (t (error "Unknown l2cap channel"))
     ))
 
@@ -2829,6 +2889,25 @@
   (let ((conn (getf (cadr packet) :handle)))
     (setf (getf (get-smp-context conn) :encrypted) t)))
 
+(defun process-le-conn-update-complete (hci packet)
+  (destructuring-bind (&key conn-handle interval latency timeout
+                         &allow-other-keys)
+      (cadr packet)
+    (when (and (getf *mitm* :ready)
+               (getf *mitm* :central)
+               (eql (getf *mitm* :central) conn-handle))
+      (log-inf "MITM: forwarding conn update")
+      (hci-send-cmd
+       hci
+       (make-hci-cmd :le-conn-update
+                     :handle (mitm-other-conn conn-handle)
+                     :interval-min interval
+                     :interval-max interval
+                     :max-latency latency
+                     :timeout timeout
+                     :min-ce-len 0
+                     :max-ce-len (- (* interval 2) 10))))))
+
 (defun handle-evt (hci packet)
   ;; TODO: don't /dev/null the 'vents
   (log-dbg (format nil "HANDLE-EVT ~X" packet))
@@ -2839,6 +2918,8 @@
      (process-ltk-request hci packet))
     (:encryption-change
      (process-encryption-change hci packet))
+    (:le-conn-update
+     (process-le-conn-update-complete hci packet))
      ))
 
 (defun process-hci (hci packet)
