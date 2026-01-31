@@ -3044,35 +3044,6 @@
  (getf *controller* :rx-mailbox)
  (getf *controller* :stop-signal))
 
-;; TODO: (before able to run script)
-;; - split `hci' into
-;;   - rx/tx serial streams, acl recomb
-;;   - upper layer stuff (rx/tx mailboxes, rxq, address)
-;; - wrap SEND and RECEIVE to use the mailboxes now
-;;
-;; MAKE-HCI-SERVER
-;; input: h2c/c2h streams
-;;
-;; hci split
-;;
-;; server:
-;; input: stream names, destination mailboxes
-;;
-;; reads from the H4 recombination machine
-;; basically an H4 packetizer
-;; cares about fragmenting and recombining ACL packets / events
-;; - TX/RX FIFOs
-;; - TX/RX mailboxes
-;; - ACL tx/rx size
-;; - currently recombined acl packet (per-conn)
-;;
-;; client:
-;; only cares about controller device:
-;; - rx queue
-;; - whole-packet blocking TX
-;; - whole-packet nonblocking RX
-;; - address
-
 (time
  (let ((hci *controller*))
    (hci-log-reset)
@@ -3192,21 +3163,3 @@
 ;;   - read/write/notify
 ;;   - decoder plug-ins for data
 ;;   - ability to coexist w/ REPL
-;;
-;; How do we get there?
-;; - need an HCI "server"
-;;   - send whole packets
-;;   - recv whole packets
-;;   - server start/stop
-;;
-;; server gives TX and RX mailboxes
-;; -> two threads: one TX and one RX
-;; -> REPL/GUI *never* interact with hardware
-;;
-;; send a command:
-;; -> send via TX mailbox
-;; -> wait for response? we already have this?
-;;
-;; receive events:
-;; -> wait on RX mailbox w/ timeout
-;;
