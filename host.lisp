@@ -665,14 +665,6 @@
          :packet packet)
         *hci-log*))
 
-(defun send (hci type payload)
-  "Format a payload into H4 and send to hci device"
-  (let ((stream (getf hci :h2c))
-        (packet (make-h4 type payload)))
-    (log-trace (format nil "TX: ~x" packet))
-    (hci-log :h2c packet)
-    (write-sequence packet stream)))
-
 (defun h4-parse-opcode (packet)
   "Looks up the H4 opcode"
   (plist-key +h4-types+ (car packet)))
@@ -745,9 +737,9 @@
      :payload payload
      :raw packet)))
 
-(defun append-to-acl-in (hci fragment)
-  (setf (getf hci :acl-in)
-        (append (getf hci :acl-in) fragment)))
+(defun append-to-acl-in (packetizer fragment)
+  (setf (getf packetizer :acl-in)
+        (append (getf packetizer :acl-in) fragment)))
 
 (defun decode-l2cap (conn fragment)
   (list :conn-handle conn
@@ -757,9 +749,9 @@
 
 (defconstant +l2-hdr-size+ 4)
 
-(defun complete-acl (hci conn fragment)
+(defun complete-acl (packetizer conn fragment)
   ;; for now only one conn supported
-  (let* ((l2pac (append-to-acl-in hci fragment))
+  (let* ((l2pac (append-to-acl-in packetizer fragment))
          (l2size
            (+ +l2-hdr-size+
               (decode-c-int (subseq l2pac 0 2))))
@@ -768,25 +760,25 @@
     (log-trace (format nil "[ACL-APPEND] (~A/~A) ~X" current-size l2size l2pac))
     (if (= l2size current-size)
         (progn
-          (setf (getf hci :acl-in) '())
+          (setf (getf packetizer :acl-in) '())
           (decode-l2cap conn l2pac))
         nil)))
 
 (defun decode-acl-type (header)
   (ldb (byte 2 12) (logand (decode-c-int header) #xB000)))
 
-(defun decode-hci-acl (hci header payload)
+(defun decode-hci-acl (packetizer header payload)
   (let ((conn-handle (logand (decode-c-int header) #x0FFF))
         (pb-flag (decode-acl-type header)))
     (if (zerop pb-flag)
         ;; This branch is dead code with the current controller rn
         (decode-l2cap conn-handle payload)
-        (complete-acl hci conn-handle payload))))
+        (complete-acl packetizer conn-handle payload))))
 
-(defun receive (hci)
+(defun receive (packetizer)
   "Receive and decode a single HCI packet"
   ;; initial implementation is H4
-  (let ((stream (getf hci :c2h)))
+  (let ((stream (getf packetizer :c2h)))
     (let* ((packet (rx-h4 stream))
            (opcode (getf packet :opcode))
            (header (getf packet :header))
@@ -794,7 +786,7 @@
       (hci-log :c2h (getf packet :raw))
       (case opcode
         (:evt (list :evt (decode-hci-event header payload)))
-        (:acl (list :acl (decode-hci-acl hci header payload)))
+        (:acl (list :acl (decode-hci-acl packetizer header payload)))
         (t (error "doesn't look like anything to me"))))))
 
 (defun add-to-rxq (hci packet)
@@ -811,22 +803,52 @@
           packet))))
 
 (require 'sb-concurrency)
-
-(defun make-rx-mailbox ()
-  (sb-concurrency:make-mailbox :name "HCI RX"))
-
-(defun receive-thread-entrypoint (hci)
-  (loop
-    (sb-concurrency:send-message
-     (getf hci :rx-mailbox)
-     (receive hci))))
-
 (ql:quickload :bordeaux-threads)
 
-(defun receive-in-thread (hci)
+(defun make-signal ()
+  (sb-concurrency:make-gate))
+
+(defun wait-for-signal (var)
+  (sb-concurrency:wait-on-gate var))
+
+(defun send-signal (var)
+  (sb-concurrency:open-gate var))
+
+(defun make-mailbox (name)
+  (sb-concurrency:make-mailbox :name name))
+
+(defun drain-mailbox (mb)
+  (sb-concurrency:receive-message mb :timeout 0.1))
+
+(defun send-to-hci (hci packet)
+  (sb-concurrency:send-message (getf hci :tx-mailbox) packet))
+
+(defun send (hci type payload)
+  "Format a payload into H4 and send to hci device"
+  (let ((packet (make-h4 type payload)))
+    (log-trace (format nil "TX: ~x" packet))
+    (hci-log :h2c packet)
+    (send-to-hci hci packet)))
+
+(defun receive-in-thread (packetizer)
   (bt:make-thread
-   (lambda () (receive-thread-entrypoint hci))
-   :name "HCI RX thread"))
+   (lambda ()
+     (loop
+       (sb-concurrency:send-message
+        (getf packetizer :rx-mailbox)
+        (receive packetizer))))
+   :name "Packetizer RX thread"))
+
+(defun send-in-thread (packetizer)
+  (bt:make-thread
+   (lambda ()
+     (loop
+       (let ((packet
+               (sb-concurrency:receive-message
+                (getf packetizer :tx-mailbox))))
+         (when packet
+           (write-sequence packet (getf packetizer :h2c))))))
+   :name "Packetizer TX thread"))
 
 (defun wait-next-hci-rx (hci)
   (add-to-rxq
@@ -929,16 +951,23 @@
 
 ;;;;;;;;;;;;; host
 
-(defun make-hci-dev (h2c-stream c2h-stream)
+(defun make-hci-packetizer (h2c-stream c2h-stream)
   (list
    :h2c h2c-stream
    :c2h c2h-stream
-   :rxq '()
-   :rx-mailbox (make-rx-mailbox)
+   :rx-mailbox '()
+   :tx-mailbox '()
    :acl-in '()
    :acl-tx-size 0
    :acl-tx-num 0
-   :acl-rx-size 0
+   :acl-rx-size 0))
+
+(defun make-controller ()
+  (list
+   :rx-mailbox (make-mailbox "HCI H <= C")
+   :tx-mailbox (make-mailbox "HCI H => C")
+   :stop-signal (make-signal)
+   :rxq '()
    :random-address 0))
 
 ;;;;;;;;;;;;; script
@@ -976,20 +1005,13 @@
            (progn ,@body)
            )))))
 
-(defmacro with-hci (instance h2c-path c2h-path &body body)
-  (with-gensyms (h2c c2h threads)
+(defmacro with-packetizer (instance h2c-path c2h-path &body body)
+  (with-gensyms (h2c c2h)
     `(with-open-stream (,h2c (open-simplex-fd ,h2c-path t))
        (with-open-stream (,c2h (open-simplex-fd ,c2h-path nil))
-         (let ((,threads)
-               (,instance (make-hci-dev ,h2c ,c2h)))
-           (unwind-protect
-                (progn (push (receive-in-thread ,instance) ,threads)
-                       (progn ,@body))
-             (progn
-               (log-dbg (format nil "Killing threads: ~A" ,threads))
-               (ignore-errors
-                (mapc #'bt:destroy-thread ,threads))))
-           )))))
+         (let ((,instance (make-hci-packetizer ,h2c ,c2h)))
+           (progn ,@body)
+         )))))
 
 ;; (with-bsim sim *bs-rx-path* *bs-tx-path*
 ;;   (log-dbg (format nil "connected to PHY (rx ~A tx ~A)"
@@ -2406,7 +2428,7 @@
 (defun smp-make-packet (op param)
   (append (smp-make-opcode op) param))
 
-(ql:quickload 'ironclad)
+(ql:quickload :ironclad)
 
 (defparameter *testkey* nil)
 ;; (defparameter *testkey* (ironclad:generate-key-pair :SECP256R1))
@@ -2978,8 +3000,81 @@
           (encrypt-link hci conn)
           (smp-send-pairing-req hci conn))))
 
+(defun monitor-thread (stop-signal)
+  (bt:make-thread
+   (lambda () (wait-for-signal stop-signal))
+   :name "Server signal thread"))
+
+(defun start-hci (h2c-mailbox c2h-mailbox stop-signal)
+  ;; First thing is to empty the mailboxes
+  (loop while (drain-mailbox h2c-mailbox))
+  (loop while (drain-mailbox c2h-mailbox))
+
+  (bt:make-thread
+   (lambda ()
+     (with-packetizer packetizer *h2c-path* *c2h-path*
+       (setf (getf packetizer :rx-mailbox) c2h-mailbox)
+       (setf (getf packetizer :tx-mailbox) h2c-mailbox)
+
+       (let ((threads))
+         (unwind-protect
+              (progn
+                (push (receive-in-thread packetizer) threads)
+                (push (send-in-thread packetizer) threads)
+                (push (monitor-thread stop-signal) threads)
+                ;; todo monitor all threads
+                (loop until (find-if-not #'bt:thread-alive-p threads)
+                      do (sleep .5)))
+           (progn
+             (log-dbg (format nil "Killing threads: ~A" threads))
+             (mapc
+              (lambda (th) (ignore-errors
+                            (bt:destroy-thread th)))
+              threads)))
+         )))
+   :name "Packetizer (HCI server) master thread"))
+
+(defun stop-hci (stop-signal)
+  ;; Kill all threads started by start-hci
+  (send-signal stop-signal))
+
+(defparameter *controller* (make-controller))
+(start-hci
+ (getf *controller* :tx-mailbox)
+ (getf *controller* :rx-mailbox)
+ (getf *controller* :stop-signal))
+
+;; TODO: (before able to run script)
+;; - split `hci' into
+;;   - rx/tx serial streams, acl recomb
+;;   - upper layer stuff (rx/tx mailboxes, rxq, address)
+;; - wrap SEND and RECEIVE to use the mailboxes now
+;;
+;; MAKE-HCI-SERVER
+;; input: h2c/c2h streams
+;;
+;; hci split
+;;
+;; server:
+;; input: stream names, destination mailboxes
+;;
+;; reads from the H4 recombination machine
+;; basically an H4 packetizer
+;; cares about fragmenting and recombining ACL packets / events
+;; - TX/RX FIFOs
+;; - TX/RX mailboxes
+;; - ACL tx/rx size
+;; - currently recombined acl packet (per-conn)
+;;
+;; client:
+;; only cares about controller device:
+;; - rx queue
+;; - whole-packet blocking TX
+;; - whole-packet nonblocking RX
+;; - address
+
 (time
- (with-hci hci *h2c-path* *c2h-path*
+ (let ((hci *controller*))
    (hci-log-reset)
    (log-inf "================ enter ===============")
    (log-inf (format nil "Our table: ~A~%" (gattc-print *gatts-table*)))
@@ -3060,7 +3155,7 @@
      (log-inf "#######################################")
 
      ;; Sleep for a while, but still process packets
-     (loop for i from 0 to 1000 do
+     (loop for i from 0 to 100 do
        (progn
          (drain-rxq hci)
          (do-idle-work hci)
@@ -3075,6 +3170,7 @@
    (log-inf "================ exit ===============")
    ))
 
+(stop-hci (getf *controller* :stop-signal))
 (hci-log-write)
 
 ;; TODO:
@@ -3102,3 +3198,15 @@
 ;;   - send whole packets
 ;;   - recv whole packets
 ;;   - server start/stop
+;;
+;; server gives TX and RX mailboxes
+;; -> two threads: one TX and one RX
+;; -> REPL/GUI *never* interact with hardware
+;;
+;; send a command:
+;; -> send via TX mailbox
+;; -> wait for response? we already have this?
+;;
+;; receive events:
+;; -> wait on RX mailbox w/ timeout
+;;
