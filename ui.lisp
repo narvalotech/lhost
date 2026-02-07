@@ -39,6 +39,10 @@
                               :data (append
                                      (make-ad :flags '(#x01))
                                      (make-ad-name "Delorean audio"))))
+   (list #xF89DC52A5202 (list :rssi -80
+                              :data (append
+                                     (make-ad :flags '(#x01))
+                                     (make-ad-name "overwrites"))))
    (list #xF89DD2215203 (list :rssi -42
                               :data (append
                                      (make-ad :flags '(#x01))
@@ -67,7 +71,19 @@
              devices)
     devs))
 
+(defun print-addr (address)
+  (format nil "~{~2,'0X~^:~}"
+          (subseq (make-c-int :u64 address t) 2)))
+
 (get-scanned-devices *devices*)
+ ; => ((:ADDRESS 273356718952963 :NAME "HeartRate Sensor 100" :RSSI -42 :DATA
+ ;  (2 1 1 21 9 72 101 97 114 116 82 97 116 101 32 83 101 110 115 111 114 32 49
+ ;   48 48))
+ ; (:ADDRESS 273356501438978 :NAME "overwrites" :RSSI -80 :DATA
+ ;  (2 1 1 11 9 111 118 101 114 119 114 105 116 101 115))
+ ; (:ADDRESS 273356501441537 :NAME "Nose Thermometer 800" :RSSI -128 :DATA
+ ;  (2 1 1 21 9 78 111 115 101 32 84 104 101 114 109 111 109 101 116 101 114 32
+ ;   56 48 48)))
 
 (defun make-button (frame text command)
   (make-instance 'ng:button
@@ -75,18 +91,32 @@
                  :text text
                  :command command))
 
+;; (named-readtables:in-readtable nodgui.syntax:nodgui-syntax)
+
+(defun get-selected-device (treeview)
+  (let ((sel (ng:treeview-get-selection treeview)))
+    (when sel
+      (list
+       :address
+       (slot-value (car sel) 'ng:id)
+       :values
+       (slot-value (car sel) 'ng:column-values)))))
+
 (ng:with-nodgui ()
-  (ng:wm-title ng:*tk* "grid-example.lisp")
+  (ng:wm-title ng:*tk* "azul")
                                         ; first, make some widgets and parent frames
   (let* ((content (make-instance 'ng:frame))
          (activity-frame (make-instance 'ng:frame :master content
                                                   :borderwidth 5 :relief :ridge
                                                   :width 600 :height 400))
          (command-frame (make-instance 'ng:frame :master content
-                                                 ;; :borderwidth 5 :relief :ridge
-                                                 :width 200))
+                                       ;; :borderwidth 5 :relief :ridge
+                                       :width 200))
          (log-frame (make-instance 'ng:frame :master content
                                              :width 600 :height 200))
+         (treeview (make-instance 'ng:scrolled-treeview
+                                  :columns (list "rssi" "name" "data")
+                                  :master activity-frame))
          )
 
     ;; Add all the frames
@@ -95,7 +125,7 @@
     (ng:grid command-frame 0 0 :sticky "nsew")
     (ng:grid log-frame 1 0 :columnspan 2 :sticky "nsew")
 
-    ;; autosize root window
+    ;; Autosize root window
     (ng:grid-columnconfigure ng:*tk* 0 :weight 1)
     (ng:grid-rowconfigure ng:*tk* 0 :weight 1)
     (ng:resizable ng:*tk* 0 0)
@@ -109,7 +139,9 @@
              (make-button command-frame "Stop scan"
                           (lambda () (log-inf "stop-scan")))
              (make-button command-frame "Connect"
-                          (lambda () (log-inf "connect")))
+                          (lambda () (log-inf
+                                      (format nil "connect to ~A"
+                                              (get-selected-device treeview)))))
              (make-button command-frame "Disconnect"
                           (lambda () (log-inf "disconnect")))
              (make-button command-frame "Advertise"
@@ -120,4 +152,35 @@
 
       (loop for button in buttons do
         (ng:grid button (incf row) 0 :sticky "ew" :padx 5 :pady 2)))
-      ))
+
+    ;; Populate the activity view.
+    ;; For now, this is just a list of scanned devices.
+    ;; Set sort functions on column label click
+    (ng:treeview-heading treeview ng:+treeview-first-column-id+
+                         :text "MAC"
+                         :command (lambda () (log-err "Sorting by last packet")))
+    (ng:treeview-heading treeview "rssi"
+                         :command (lambda () (log-err "Sorting by RSSI")))
+    (ng:treeview-heading treeview "name"
+                         :command (lambda () (log-err "Sorting by name")))
+    (ng:grid treeview 0 0 :sticky "nsew")
+
+    ;; figure out how to make events work
+    ;; (ng:tag-bind treeview "tv" #$<ButtonPress-1>$ (lambda (i) (log-inf (format nil "clicked ~A" i))))
+
+    ;; Add devices
+    (loop for device in (get-scanned-devices *devices*) do
+      (ng:treeview-insert-item treeview
+                               :id (princ-to-string (getf device :address))
+                               :text (print-addr (getf device :address))
+                               :tag "tv"
+                               :column-values
+                               (list
+                                (princ-to-string (getf device :rssi))
+                                (getf device :name)
+                                (px (getf device :data)))))
+
+    ;; Autosize column widths
+    ;; TODO: fixed column sizes please
+    (ng:treeview-refit-columns-width treeview)
+    ))
