@@ -3,7 +3,7 @@
 ## What is it?
 
 A toy implementation of the Bluetooth LE host in common lisp.
-It's really broken, please don't use it.
+It's very buggy, use at your own risk.
 
 For now, it talks to a virtualized controller that uses the [Babblesim](https://babblesim.github.io/#content) simulator.
 
@@ -18,8 +18,9 @@ For now, it talks to a virtualized controller that uses the [Babblesim](https://
 
 - Open vscode in the repo root
 - Trigger "open in container" (usually a popup)
-- In a new vscode terminal: `./support/brun.sh`
+- In a new vscode terminal: `./support/build.sh && ./support/run-mitm.sh`
 - Eval `host.lisp` in emacs
+- Eval `script.lisp` in emacs
 - Check the REPL for output
 
 ## How it works
@@ -31,6 +32,20 @@ For now, it talks to a virtualized controller that uses the [Babblesim](https://
 - `/tmp` is mounted in the container, the fifo is created there
 - `host.lisp` connects to that FIFO and talks HCI-H4 protocol
 
-## How about a real device
+## Features
 
-Able to be discovered by pixel 8.
+- role-agnostic gatt server and client
+- central bonding (JW + LESC only)
+- peripheral bonding (ditto)
+- MITM of a just-works LESC link
+  - tested with phone + HRM sensor among others
+- hcisnoop logs
+- basic UI
+- pretty much no restrictions / api checks
+  - very hackable
+  - also very brittle
+
+## Connecting to the real world
+
+See [host.lisp](./host.lisp) there's a socat command somewhere.
+Basically you flash a nRF dongle with the zephyr controller and off you go.
