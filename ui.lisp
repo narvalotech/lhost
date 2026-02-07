@@ -91,8 +91,6 @@
                  :text text
                  :command command))
 
-;; (named-readtables:in-readtable nodgui.syntax:nodgui-syntax)
-
 (defun get-selected-device (treeview)
   (let ((sel (ng:treeview-get-selection treeview)))
     (when sel
@@ -102,10 +100,14 @@
        :values
        (slot-value (car sel) 'ng:column-values)))))
 
+(defun queue (mailbox event)
+  (sb-concurrency:send-message mailbox event))
+
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "azul")
                                         ; first, make some widgets and parent frames
-  (let* ((content (make-instance 'ng:frame))
+  (let* ((ui-events (make-mailbox "ui events"))
+         (content (make-instance 'ng:frame))
          (activity-frame (make-instance 'ng:frame :master content
                                                   :borderwidth 5 :relief :ridge
                                                   :width 600 :height 400))
@@ -119,6 +121,9 @@
                                   :master activity-frame))
          )
 
+    ;; Register quit action
+    (ng:on-close ng:*tk* (lambda () (queue ui-events :quit)))
+
     ;; Add all the frames
     (ng:grid content 0 0 :sticky "nsew")
     (ng:grid activity-frame 0 1 :sticky "nsew")
@@ -131,27 +136,24 @@
     (ng:resizable ng:*tk* 0 0)
 
     ;; Populate the command palette
-    (let ((row -1)
-          (buttons
-            (list
-             (make-button command-frame "Start scan"
-                          (lambda () (log-inf "start-scan")))
-             (make-button command-frame "Stop scan"
-                          (lambda () (log-inf "stop-scan")))
-             (make-button command-frame "Connect"
-                          (lambda () (log-inf
-                                      (format nil "connect to ~A"
-                                              (get-selected-device treeview)))))
-             (make-button command-frame "Disconnect"
-                          (lambda () (log-inf "disconnect")))
-             (make-button command-frame "Advertise"
-                          (lambda () (log-inf "start-adv")))
-             (make-button command-frame "Stop adv"
-                          (lambda () (log-inf "stop-adv")))
-             )))
-
-      (loop for button in buttons do
-        (ng:grid button (incf row) 0 :sticky "ew" :padx 5 :pady 2)))
+    (let ((row -1))
+      (mapcar
+       (lambda (button)
+         (ng:grid button (incf row) 0 :sticky "ew" :padx 5 :pady 2))
+       (list
+        (make-button command-frame "Start scan"
+                     (lambda () (queue ui-events :start-scan)))
+        (make-button command-frame "Stop scan"
+                     (lambda () (queue ui-events :stop-scan)))
+        (make-button command-frame "Connect"
+                     (lambda () (queue ui-events :connect)))
+        (make-button command-frame "Disconnect"
+                     (lambda () (queue ui-events :disconnect)))
+        (make-button command-frame "Advertise"
+                     (lambda () (queue ui-events :start-adv)))
+        (make-button command-frame "Stop adv"
+                     (lambda () (queue ui-events :stop-adv)))
+        )))
 
     ;; Populate the activity view.
     ;; For now, this is just a list of scanned devices.
@@ -164,9 +166,6 @@
     (ng:treeview-heading treeview "name"
                          :command (lambda () (log-err "Sorting by name")))
     (ng:grid treeview 0 0 :sticky "nsew")
-
-    ;; figure out how to make events work
-    ;; (ng:tag-bind treeview "tv" #$<ButtonPress-1>$ (lambda (i) (log-inf (format nil "clicked ~A" i))))
 
     ;; Add devices
     (loop for device in (get-scanned-devices *devices*) do
@@ -183,4 +182,32 @@
     ;; Autosize column widths
     ;; TODO: fixed column sizes please
     (ng:treeview-refit-columns-width treeview)
+
+    ;; TODO:
+    ;; - spawn a thread for RX HCI events
+    ;; - give it the 'ui-events mailbox
+    ;; - return that TID so we can terminate it when we quit
+    ;; - that thread puts host events on the mailbox
+    ;; - we handle them just like UI events
+
+    ;; Poll for events
+    (loop while
+      (let ((evt (sb-concurrency:receive-message ui-events)))
+        (log-dbg (format nil "EVT: ~A" evt))
+        (ecase evt
+          (:start-scan t)
+          (:stop-scan t)
+          (:connect
+           (progn
+             (log-inf
+              (format nil "connect to ~A"
+                      (get-selected-device treeview)))
+             t))
+          (:disconnect t)
+          (:start-adv t)
+          (:stop-adv t)
+          (:quit nil))))
+
+    (log-inf "Exiting UI")
+    (ng:exit-nodgui)
     ))
