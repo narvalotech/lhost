@@ -190,6 +190,25 @@
     ;; - that thread puts host events on the mailbox
     ;; - we handle them just like UI events
 
+    ;; Remaining work
+    ;; - add log widget. redirect stderr there.
+    ;; - implement column sort functions
+    ;; - add device/connection view
+    ;;   - figure out how to show a device (GATT treeview?)
+    ;;   - render a sample gatt table (from lhost)
+    ;; - use real events
+    ;;
+    ;; connection view
+    ;; - gatt read
+    ;; - gatt write
+    ;; - gatt subscribe
+    ;; - gatt server editor
+    ;; - gatt table clone
+    ;; - encryption
+    ;;
+    ;; misc
+    ;; - mitm +view
+
     ;; Poll for events
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
