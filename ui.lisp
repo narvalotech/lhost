@@ -103,9 +103,23 @@
 (defun queue (mailbox event)
   (sb-concurrency:send-message mailbox event))
 
+(defun make-menuitem (master text q command-id &optional accelerator)
+  (apply #'make-instance
+         (append
+          (list 'ng:menubutton :master master :text text
+                               :command (lambda () (queue q command-id)))
+          (when accelerator
+            ;; Bind the keyboard event
+            (ng:bind (ng:root-toplevel) accelerator (lambda (e)
+                                                      (declare (ignore e))
+                                                      (queue q command-id)))
+            ;; Display the keyboard shortcut in the menu
+            (list
+             :accelerator accelerator)))))
+
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "azul")
-                                        ; first, make some widgets and parent frames
+
   (let* ((ui-events (make-mailbox "ui events"))
          (content (make-instance 'ng:frame))
          (activity-frame (make-instance 'ng:frame :master content
@@ -119,6 +133,11 @@
          (treeview (make-instance 'ng:scrolled-treeview
                                   :columns (list "rssi" "name" "data")
                                   :master activity-frame))
+         (menubar (ng:make-menubar))
+         (scan-menu (make-instance 'ng:menu :master menubar :text "Scan"))
+         (connection-menu (make-instance 'ng:menu :master menubar :text "Connection"))
+         (att-menu (make-instance 'ng:menu :master menubar :text "GATT client"))
+         (gatt-server-menu (make-instance 'ng:menu :master menubar :text "GATT server"))
          )
 
     ;; Register quit action
@@ -209,11 +228,36 @@
     ;; misc
     ;; - mitm +view
 
+    ;; Scan menu
+    (make-menuitem scan-menu "Scan" ui-events :start-scan "<Control-s>")
+    (make-menuitem scan-menu "Stop scan" ui-events :stop-scan "<Control-S>")
+    (make-menuitem scan-menu "Connect" ui-events :connect "<Control-c>")
+
+    ;; In-connection menu
+    (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<Control-d>")
+    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<Control-e>")
+
+    (make-menuitem connection-menu "Bond" ui-events :bond "<Control-b>")
+    (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<Control-u>")
+    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<Control-m>")
+
+    ;; GATT client
+    (make-menuitem att-menu "Read" ui-events :att-read "<Control-r>")
+    (make-menuitem att-menu "Write" ui-events :att-write "<Control-w>")
+    (make-menuitem att-menu "Subscribe" ui-events :att-sub "<Control-x>")
+
+    ;; GATT server
+    (make-menuitem gatt-server-menu "Read" ui-events :gatt-server-get "<Control-R>")
+    (make-menuitem gatt-server-menu "Write" ui-events :gatt-server-set "<Control-W>")
+    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<Control-N>")
+    (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone)
+
     ;; Poll for events
+    ;; TODO: move this to another thread
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
         (log-dbg (format nil "EVT: ~A" evt))
-        (ecase evt
+        (case evt
           (:start-scan t)
           (:stop-scan t)
           (:connect
