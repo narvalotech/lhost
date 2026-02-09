@@ -32,18 +32,22 @@
 (defparameter *testlist*
   (list
    (list #xF89DC52A5C01 (list :rssi -128
+                              :timestamp 0
                               :data (append
                                      (make-ad :flags '(#x01))
                                      (make-ad-name "Nose Thermometer 800"))))
    (list #xF89DC52A5202 (list :rssi -69
+                              :timestamp 12312
                               :data (append
                                      (make-ad :flags '(#x01))
                                      (make-ad-name "Delorean audio"))))
    (list #xF89DC52A5202 (list :rssi -80
+                              :timestamp 12319
                               :data (append
                                      (make-ad :flags '(#x01))
                                      (make-ad-name "overwrites"))))
    (list #xF89DD2215203 (list :rssi -42
+                              :timestamp 10319
                               :data (append
                                      (make-ad :flags '(#x01))
                                      (make-ad-name "HeartRate Sensor 100"))))))
@@ -55,8 +59,9 @@
   (let* ((parsed (parse-ad ad))
          (encoded-name (or (getf parsed :name-complete)
                            (getf parsed :name-short))))
-    (when encoded-name
-      (from-c-string encoded-name))))
+    (if encoded-name
+        (from-c-string encoded-name)
+        "")))
 
 ;; Returns a list of address + rssi + name + data
 (defun get-scanned-devices (devices &key (order-by :rssi))
@@ -66,6 +71,7 @@
                (push (list :address address
                            :name (parse-name (getf details :data))
                            :rssi (getf details :rssi)
+                           :timestamp (getf details :timestamp)
                            :data (getf details :data))
                      devs))
              devices)
@@ -116,6 +122,14 @@
             ;; Display the keyboard shortcut in the menu
             (list
              :accelerator accelerator)))))
+
+(defun sort-scan (devices by)
+  (sort devices
+        (case by
+          (:recent (lambda (a b) (< (getf a :timestamp) (getf b :timestamp))))
+          (:rssi (lambda (a b) (> (getf a :rssi) (getf b :rssi))))
+          (:name (lambda (a b) (string-lessp (getf a :name) (getf b :name))))
+          (otherwise (lambda (a b) (string-lessp (getf a :name) (getf b :name)))))))
 
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "azul")
@@ -175,32 +189,39 @@
         )))
 
     ;; Populate the activity view.
-    ;; For now, this is just a list of scanned devices.
     ;; Set sort functions on column label click
-    (ng:treeview-heading treeview ng:+treeview-first-column-id+
-                         :text "MAC"
-                         :command (lambda () (log-err "Sorting by last packet")))
-    (ng:treeview-heading treeview "rssi"
-                         :command (lambda () (log-err "Sorting by RSSI")))
-    (ng:treeview-heading treeview "name"
-                         :command (lambda () (log-err "Sorting by name")))
-    (ng:grid treeview 0 0 :sticky "nsew")
+    (labels ((add-devices-to-treeview (devices)
+               (ng:treeview-delete-all treeview)
+               (loop for device in devices do
+                 (ng:treeview-insert-item
+                  treeview
+                  :id (princ-to-string (getf device :address))
+                  :text (print-addr (getf device :address))
+                  :tag "tv"
+                  :column-values
+                  (list
+                   (princ-to-string (getf device :rssi))
+                   (getf device :name)
+                   (px (getf device :data))))))
+             (sort-column (by)
+               (add-devices-to-treeview
+                (sort-scan (get-scanned-devices *devices*) by))))
 
-    ;; Add devices
-    (loop for device in (get-scanned-devices *devices*) do
-      (ng:treeview-insert-item treeview
-                               :id (princ-to-string (getf device :address))
-                               :text (print-addr (getf device :address))
-                               :tag "tv"
-                               :column-values
-                               (list
-                                (princ-to-string (getf device :rssi))
-                                (getf device :name)
-                                (px (getf device :data)))))
+      (ng:treeview-heading treeview ng:+treeview-first-column-id+
+                           :text "MAC"
+                           :command (lambda () (sort-column :recent)))
+      (ng:treeview-heading treeview "rssi"
+                           :command (lambda () (sort-column :rssi)))
+      (ng:treeview-heading treeview "name"
+                           :command (lambda () (sort-column :name)))
+      (ng:grid treeview 0 0 :sticky "nsew")
 
-    ;; Autosize column widths
-    ;; TODO: fixed column sizes please
-    (ng:treeview-refit-columns-width treeview)
+      ;; Add devices
+      (add-devices-to-treeview (get-scanned-devices *devices*))
+
+      ;; Autosize column widths
+      ;; TODO: fixed column sizes please
+      (ng:treeview-refit-columns-width treeview))
 
     ;; TODO:
     ;; - spawn a thread for RX HCI events
@@ -211,7 +232,6 @@
 
     ;; Remaining work
     ;; - add log widget. redirect stderr there.
-    ;; - implement column sort functions
     ;; - add device/connection view
     ;;   - figure out how to show a device (GATT treeview?)
     ;;   - render a sample gatt table (from lhost)
