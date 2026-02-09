@@ -18,6 +18,9 @@
 (defparameter *current-log-level* :dbg)
 (defparameter *log-time* nil)
 (defparameter *log-lock* (bt:make-lock "logs"))
+(defparameter *log-line-sink*
+  (lambda (line)
+    (write-string line *error-output*)))
 
 (defun yeet-log-message (severity)
   (let ((current-severity (nth 0 (getf *log-levels* *current-log-level*)))
@@ -27,10 +30,11 @@
 (defun poor-mans-log (severity message)
   (unless (yeet-log-message severity)
     (bt:with-lock-held (*log-lock*)
-      (format *error-output*  "[~A] ~A: ~A~%"
-              (if *log-time* (local-time:now) "")
-              (nth 1 (getf *log-levels* severity))
-              message))))
+      (funcall *log-line-sink*
+               (format nil "[~A] ~A: ~A~%"
+                       (if *log-time* (local-time:now) "")
+                       (nth 1 (getf *log-levels* severity))
+                       message)))))
 
 (defun log-trace (message) (poor-mans-log :tra message))
 (defun log-dbg (message) (poor-mans-log :dbg message))

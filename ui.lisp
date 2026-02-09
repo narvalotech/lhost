@@ -131,19 +131,27 @@
           (:name (lambda (a b) (string-lessp (getf a :name) (getf b :name))))
           (otherwise (lambda (a b) (string-lessp (getf a :name) (getf b :name)))))))
 
+(defun log-to-widget (textview line)
+  (ng:configure textview :state :normal)
+  (ng:append-text textview line)
+  (ng:see textview "end")
+  (ng:configure textview :state :disabled))
+
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "azul")
 
   (let* ((ui-events (make-mailbox "ui events"))
          (content (make-instance 'ng:frame))
          (activity-frame (make-instance 'ng:frame :master content
-                                                  :borderwidth 5 :relief :ridge
-                                                  :width 600 :height 400))
+                                                  :height 400))
          (command-frame (make-instance 'ng:frame :master content
                                        ;; :borderwidth 5 :relief :ridge
                                        :width 200))
-         (log-frame (make-instance 'ng:frame :master content
-                                             :width 600 :height 200))
+         (log-frame (make-instance 'ng:frame :master content))
+         (log-textview (make-instance 'ng:scrolled-text :master log-frame
+                                                        :state :disabled
+                                                        :height 14))
+         (*log-line-sink* (lambda (l) (log-to-widget log-textview l)))
          (treeview (make-instance 'ng:scrolled-treeview
                                   :columns (list "rssi" "name" "data")
                                   :master activity-frame))
@@ -157,11 +165,15 @@
     ;; Register quit action
     (ng:on-close ng:*tk* (lambda () (queue ui-events :quit)))
 
+    ;; Make text widget fill its frame
+    (ng:grid-columnconfigure log-frame 0 :weight 1)
+
     ;; Add all the frames
     (ng:grid content 0 0 :sticky "nsew")
     (ng:grid activity-frame 0 1 :sticky "nsew")
     (ng:grid command-frame 0 0 :sticky "nsew")
     (ng:grid log-frame 1 0 :columnspan 2 :sticky "nsew")
+    (ng:grid log-textview 0 0 :sticky "nsew")
 
     ;; Autosize root window
     (ng:grid-columnconfigure ng:*tk* 0 :weight 1)
@@ -231,7 +243,6 @@
     ;; - we handle them just like UI events
 
     ;; Remaining work
-    ;; - add log widget. redirect stderr there.
     ;; - add device/connection view
     ;;   - figure out how to show a device (GATT treeview?)
     ;;   - render a sample gatt table (from lhost)
