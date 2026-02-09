@@ -1,6 +1,6 @@
 ;; eval host.lisp before
 (ql:quickload "nodgui")
-(setf nodgui:*default-theme* "yaru")
+(setf nodgui:*default-theme* "default")
 (sb-ext:add-package-local-nickname :ng :nodgui)
 
 ;; SCAN MVP:
@@ -138,7 +138,7 @@
   (ng:configure textview :state :disabled))
 
 (ng:with-nodgui ()
-  (ng:wm-title ng:*tk* "azul")
+  (ng:wm-title ng:*tk* "Azul '94")
 
   (let* ((ui-events (make-mailbox "ui events"))
          (content (make-instance 'ng:frame))
