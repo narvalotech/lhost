@@ -153,10 +153,11 @@
 (defun make-connection-tab (activity-frame address)
   (let ((treeview
           (make-instance 'ng:scrolled-treeview
-                         :columns (list "uuid" "value")
+                         :columns (list "type" "uuid" "value")
                          :master activity-frame)))
     (ng:treeview-heading treeview ng:+treeview-first-column-id+ :text "index")
-    (ng:notebook-add activity-frame treeview :text (print-addr address))))
+    (ng:notebook-add activity-frame treeview :text (print-addr address))
+    treeview))
 
 (defun delete-current-tab (nb)
   (ng:format-wish "~a forget current" (ng:widget-path nb)))
@@ -178,11 +179,83 @@
     (when (and path (string/= path ""))
       path)))
 
-(defun make-connection-object (address)
-  (list :address address))
+(defun make-connection-object (address treeview)
+  (list :address address :treeview treeview))
 
 (defun already-connected (address connections)
   (find-if (lambda (conn) (= (getf conn :address) address)) connections))
+
+;; From a real device (okay zephyr sample but still..)
+(defparameter *sample-gatt*
+  '((:HANDLE 1 :TYPE :SERVICE :END-HANDLE 8 :UUID 6145)
+    (:HANDLE 2 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 32 :VALUE-HANDLE 3
+     :UUID 10757)
+    (:HANDLE 3 :TYPE :CHARACTERISTIC-VALUE :UUID 10757)
+    (:HANDLE 4 :TYPE :CHARACTERISTIC-DESCRIPTOR :UUID 10498)
+    (:HANDLE 5 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 10 :VALUE-HANDLE 6
+     :UUID 11049)
+    (:HANDLE 6 :TYPE :CHARACTERISTIC-VALUE :UUID 11049)
+    (:HANDLE 7 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 2 :VALUE-HANDLE 8
+     :UUID 11050)
+    (:HANDLE 8 :TYPE :CHARACTERISTIC-VALUE :UUID 11050)
+    (:HANDLE 9 :TYPE :SERVICE :END-HANDLE 15 :UUID 6144)
+    (:HANDLE 10 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 2 :VALUE-HANDLE 11
+     :UUID 10752)
+    (:HANDLE 11 :TYPE :CHARACTERISTIC-VALUE :UUID 10752)
+    (:HANDLE 12 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 2 :VALUE-HANDLE 13
+     :UUID 10753)
+    (:HANDLE 13 :TYPE :CHARACTERISTIC-VALUE :UUID 10753)
+    (:HANDLE 14 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 2 :VALUE-HANDLE 15
+     :UUID 10756)
+    (:HANDLE 15 :TYPE :CHARACTERISTIC-VALUE :UUID 10756)
+    (:HANDLE 16 :TYPE :SERVICE :END-HANDLE 23 :UUID 6157)
+    (:HANDLE 17 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 16 :VALUE-HANDLE 18
+     :UUID 10807)
+    (:HANDLE 18 :TYPE :CHARACTERISTIC-VALUE :UUID 10807)
+    (:HANDLE 19 :TYPE :CHARACTERISTIC-DESCRIPTOR :UUID 10498)
+    (:HANDLE 20 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 2 :VALUE-HANDLE 21
+     :UUID 10808)
+    (:HANDLE 21 :TYPE :CHARACTERISTIC-VALUE :UUID 10808)
+    (:HANDLE 22 :TYPE :CHARACTERISTIC-DECLARATION :PROPERTIES 8 :VALUE-HANDLE 23
+     :UUID 10809)
+    (:HANDLE 23 :TYPE :CHARACTERISTIC-VALUE :UUID 10809)))
+
+(defun abbrev-attribute-type (attribute)
+  (case attribute
+    (:service "Service")
+    (:characteristic-declaration "Char declaration")
+    (:characteristic-value "Char value")
+    (:characteristic-descriptor "Char descriptor")
+    (otherwise " -- ")))
+
+(defun format-attribute-data (attribute)
+  ;; TODO: make this human-readable for svc, decl, desc
+  (px (getf attribute :data)))
+
+(defun format-uuid (uuid)
+  ;; TODO: pretty-print 128-bit uuid
+  (format nil "~X" uuid))
+
+(defun add-gatt-table-to-treeview (treeview gatt-table)
+  ;; Format of gatt-table is whatever lhost spits out
+  (loop for attribute in gatt-table do
+    (ng:treeview-insert-item
+                  treeview
+                  :id (princ-to-string (getf attribute :handle))
+                  :text (format nil "~4,'0,X" (getf attribute :handle))
+                  :column-values
+                  (list
+                   (abbrev-attribute-type (getf attribute :type))
+                   (format-uuid (getf attribute :uuid))
+                   (format-attribute-data attribute)))))
+
+(defun lookup-conn (address connections)
+  (find-if (lambda (c) (= (getf c :address) address)) connections))
+
+(defun add-gatt-table-to-conn (address gatt-table connections)
+  (let* ((conn (lookup-conn address connections)))
+    (when conn
+      (add-gatt-table-to-treeview (getf conn :treeview) gatt-table))))
 
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
@@ -345,8 +418,16 @@
            (let ((device (get-selected-device treeview)))
              (when (and device (not (already-connected (getf device :address) connections)))
                (log-inf "connect to ~A" device)
-               (push (make-connection-object (getf device :address)) connections)
-               (make-connection-tab activity-frame (getf device :address)))
+
+               ;; Build treeview and store it along with address in the connection list
+               (push (make-connection-object
+                      (getf device :address)
+                      (make-connection-tab activity-frame (getf device :address)))
+                     connections)
+
+               ;; Add a dummy GATT table to test out UI
+               (add-gatt-table-to-conn
+                (getf device :address) *sample-gatt* connections))
              t))
           (:disconnect
            (let ((name (get-tab-text activity-frame)))
