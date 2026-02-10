@@ -171,14 +171,6 @@
     (ng:format-wish "senddatastring [~a tab current -text]" (ng:widget-path nb))
     ))
 
-(defun get-selected-tab (nb)
-  (log-err (format nil "Deleting ~A" (get-tab-text nb)))
-  (let ((path (ng:with-read-data (nil)
-                (ng:format-wish "senddata [~a select]" (ng:widget-path nb))
-                (ng:read-data))))
-    (when (and path (string/= path ""))
-      path)))
-
 (defun make-connection-object (address treeview)
   (list :address address :treeview treeview))
 
