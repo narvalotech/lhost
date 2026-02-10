@@ -337,14 +337,14 @@
     ;; TODO: dispatch host commands in another thread
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
-        (log-dbg (format nil "EVT: ~A" evt))
+        (log-dbg "EVT: ~A" evt)
         (case evt
           (:start-scan t)
           (:stop-scan t)
           (:connect
            (let ((device (get-selected-device treeview)))
              (when (and device (not (already-connected (getf device :address) connections)))
-               (log-inf (format nil "connect to ~A" device))
+               (log-inf "connect to ~A" device)
                (push (make-connection-object (getf device :address)) connections)
                (make-connection-tab activity-frame (getf device :address)))
              t))
@@ -355,7 +355,7 @@
                      (delete-if (lambda (el)
                                   (= (getf el :address)
                                      (decode-mac name))) connections))
-               (log-inf (format nil "Disconnecting ~a" name))
+               (log-inf "Disconnecting ~a" name)
                (delete-current-tab activity-frame))
              t))
           (:start-adv t)

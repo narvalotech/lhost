@@ -27,20 +27,25 @@
         (msg-severity (nth 0 (getf *log-levels* severity))))
     (> msg-severity current-severity)))
 
-(defun poor-mans-log (severity message)
+(defun poor-mans-log (severity message args)
   (unless (yeet-log-message severity)
     (bt:with-lock-held (*log-lock*)
-      (funcall *log-line-sink*
-               (format nil "[~A] ~A: ~A~%"
-                       (if *log-time* (local-time:now) "")
-                       (nth 1 (getf *log-levels* severity))
-                       message)))))
+      ;; let's talk about optimization later ok?
+      (let ((log-line (apply #'format (append
+                                       '(nil)
+                                       (list message)
+                                       args))))
+        (funcall *log-line-sink*
+                 (format nil "[~A] ~A: ~A~%"
+                         (if *log-time* (local-time:now) "")
+                         (nth 1 (getf *log-levels* severity))
+                         log-line))))))
 
-(defun log-trace (message) (poor-mans-log :tra message))
-(defun log-dbg (message) (poor-mans-log :dbg message))
-(defun log-inf (message) (poor-mans-log :inf message))
-(defun log-wrn (message) (poor-mans-log :wrn message))
-(defun log-err (message) (poor-mans-log :err message))
+(defun log-trace (message &rest args) (poor-mans-log :tra message args))
+(defun log-dbg (message &rest args) (poor-mans-log :dbg message args))
+(defun log-inf (message &rest args) (poor-mans-log :inf message args))
+(defun log-wrn (message &rest args) (poor-mans-log :wrn message args))
+(defun log-err (message &rest args) (poor-mans-log :err message args))
 
 ;;;;;;;;;;;;; general utils
 
