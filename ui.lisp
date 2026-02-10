@@ -223,9 +223,9 @@
 (defun abbrev-attribute-type (attribute)
   (case attribute
     (:service "Service")
-    (:characteristic-declaration "Char declaration")
-    (:characteristic-value "Char value")
-    (:characteristic-descriptor "Char descriptor")
+    (:characteristic-declaration " |  Char declaration")
+    (:characteristic-value " |    | Char value")
+    (:characteristic-descriptor " |    | Char descriptor")
     (otherwise " -- ")))
 
 (defun format-attribute-data (attribute)
@@ -366,18 +366,20 @@
     ;; - we handle them just like UI events
 
     ;; Remaining work
-    ;; - add device/connection view
-    ;;   - figure out how to show a device (GATT treeview?)
-    ;;   - render a sample gatt table (from lhost)
     ;; - use real events
     ;;
     ;; connection view
-    ;; - gatt read
-    ;; - gatt write
+    ;; - auto-switch to connected tab
+    ;; - gatt read: print-to-log oughta be good enough for now
+    ;; - gatt write: make a dialog, maybe double-click?
+    ;; - show perms per attribute
     ;; - gatt subscribe
+    ;;
     ;; - gatt server editor
     ;; - gatt table clone
     ;; - encryption
+    ;;   - delete bonds
+    ;;   - save/restore bonds (save to app dir)
     ;;
     ;; misc
     ;; - mitm +view
@@ -385,7 +387,7 @@
     ;; Scan menu
     (make-menuitem scan-menu "Scan" ui-events :start-scan "<Control-s>")
     (make-menuitem scan-menu "Stop scan" ui-events :stop-scan "<Control-S>")
-    (make-menuitem scan-menu "Connect" ui-events :connect "<Control-c>")
+    (make-menuitem scan-menu "Connect" ui-events :connect "<c>")
 
     ;; In-connection menu
     (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<Control-d>")
