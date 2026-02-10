@@ -1,5 +1,6 @@
 ;; eval host.lisp before
 (ql:quickload "nodgui")
+;; (nodgui.demo:demo)
 (setf nodgui:*default-theme* "default")
 (sb-ext:add-package-local-nickname :ng :nodgui)
 
@@ -262,10 +263,19 @@
       (read-from-string (slot-value (car sel) 'ng:id)))))
 
 (defun dispatch-cmd (cmd-id &rest args)
-  (log-inf "DISPATCH ~A ARGS ~A" cmd-id args)
+  (log-inf "DISPATCH ~A ARGS ~X" cmd-id args)
   (case cmd-id
     (:att-read
-     (log-inf "ATT READ"))))
+     (log-inf "ATT READ"))
+    (:att-write
+     (log-inf "ATT WRITE"))))
+
+(defun fromhexstream (str)
+  (ignore-errors
+   (with-input-from-string (is str)
+     (loop for i from 0 below (length str) by 3
+           collect
+           (parse-integer (subseq str i (min (+ i 2) (length str))) :radix 16)))))
 
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
@@ -292,6 +302,7 @@
          (gatt-server-menu (make-instance 'ng:menu :master menubar :text "GATT server"))
 
          (connections)
+         (previous-gatt-write "")
          )
 
     ;; Register quit action
@@ -376,11 +387,9 @@
     ;; - we handle them just like UI events
 
     ;; Remaining work
-    ;; - use real events
+    ;; - use real cmds/events
     ;;
     ;; connection view
-    ;; - gatt read: print-to-log oughta be good enough for now
-    ;; - gatt write: make a dialog, maybe double-click?
     ;; - show perms per attribute
     ;; - gatt subscribe
     ;;
@@ -464,7 +473,21 @@
                (log-inf "[~A] att-read ~4,'0,X" tab-name handle)
                (dispatch-cmd :att-read (getf conn :address) handle))
              t))
-          (:att-write t)
+          (:att-write
+           (let* ((tab-name (get-tab-text activity-frame))
+                  (conn (lookup-conn (decode-mac tab-name) connections))
+                  (handle (get-selected-attribute (getf conn :treeview))))
+             (when handle
+               (log-inf "[~A] att-write ~4,'0,X" tab-name handle)
+               (let* ((data
+                        (nodgui.mw:text-input-dialog
+                         content "GATT Write" "GATT Write Data (e,g, 01 ef 32 c1)"
+                         :text previous-gatt-write))
+                      (parsed-data (fromhexstream data)))
+                 (when parsed-data
+                   (setf previous-gatt-write data)
+                   (dispatch-cmd :att-write (getf conn :address) handle data))))
+             t))
           (:att-sub t)
 
           (:start-adv t)
