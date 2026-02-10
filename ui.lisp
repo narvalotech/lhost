@@ -255,6 +255,18 @@
     (when conn
       (add-gatt-table-to-treeview (getf conn :treeview) gatt-table))))
 
+(defun get-selected-attribute (treeview)
+  (let ((sel (ng:treeview-get-selection treeview)))
+    (when sel
+      ;; item ID _is_ the handle
+      (read-from-string (slot-value (car sel) 'ng:id)))))
+
+(defun dispatch-cmd (cmd-id &rest args)
+  (log-inf "DISPATCH ~A ARGS ~A" cmd-id args)
+  (case cmd-id
+    (:att-read
+     (log-inf "ATT READ"))))
+
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
 
@@ -372,13 +384,16 @@
     ;; - show perms per attribute
     ;; - gatt subscribe
     ;;
+    ;;MVP: adv and gatts can be a text file
+    ;; - advertising data editor
     ;; - gatt server editor
-    ;; - gatt table clone
+    ;;
     ;; - encryption
     ;;   - delete bonds
     ;;   - save/restore bonds (save to app dir)
     ;;
     ;; misc
+    ;; - gatt table clone
     ;; - mitm +view
 
     ;; Scan menu
@@ -440,6 +455,18 @@
                (log-inf "Disconnecting ~a" name)
                (delete-current-tab activity-frame))
              t))
+
+          (:att-read
+           (let* ((tab-name (get-tab-text activity-frame))
+                  (conn (lookup-conn (decode-mac tab-name) connections))
+                  (handle (get-selected-attribute (getf conn :treeview))))
+             (when handle
+               (log-inf "[~A] att-read ~4,'0,X" tab-name handle)
+               (dispatch-cmd :att-read (getf conn :address) handle))
+             t))
+          (:att-write t)
+          (:att-sub t)
+
           (:start-adv t)
           (:stop-adv t)
           (:quit nil))))
