@@ -105,23 +105,3 @@
 
 (stop-hci (getf *controller* :stop-signal))
 (hci-log-write)
-
-;; TODO:
-;; - REPL usage
-;; - clone GATT table
-;;
-;; Okay so here's what we really need:
-;;
-;; - consume or mangle any data/event from LL
-;; - REPL: send commands and data synchronously
-;; - GUI:  lil bit like REPL. Features:
-;;   - select comport
-;;   - scan/stop
-;;   - adv/stop
-;;   - connect/disconnect
-;;   - conn status+role
-;;   - query peer GATT (cache)
-;;   - query local GATT
-;;   - read/write/notify
-;;   - decoder plug-ins for data
-;;   - ability to coexist w/ REPL
