@@ -81,6 +81,16 @@
   (format nil "~{~2,'0X~^:~}"
           (subseq (make-c-int :u64 address t) 2)))
 
+(print-addr #xF89DC52A5C01)
+ ; => "F8:9D:C5:2A:5C:01"
+
+(defun decode-mac (address-string)
+  (parse-integer (remove #\: address-string) :radix 16))
+
+;; look ma! end-to-end testing!
+(print-addr (decode-mac (print-addr #xF89DC52A5C01)))
+ ; => "F8:9D:C5:2A:5C:01"
+
 (get-scanned-devices *devices*)
  ; => ((:ADDRESS 273356718952963 :NAME "HeartRate Sensor 100" :RSSI -42 :DATA
  ;  (2 1 1 21 9 72 101 97 114 116 82 97 116 101 32 83 101 110 115 111 114 32 49
@@ -102,7 +112,8 @@
     (when sel
       (list
        :address
-       (slot-value (car sel) 'ng:id)
+       (read-from-string
+        (slot-value (car sel) 'ng:id))
        :values
        (slot-value (car sel) 'ng:column-values)))))
 
@@ -135,15 +146,51 @@
   (ng:configure textview :state :normal)
   (ng:append-text textview line)
   (ng:see textview "end")
-  (ng:configure textview :state :disabled))
+  (ng:configure textview :state :disabled)
+  ;; also log to stderr in case UI crashes
+  (write-string line *error-output*))
+
+(defun make-connection-tab (activity-frame address)
+  (let ((treeview
+          (make-instance 'ng:scrolled-treeview
+                         :columns (list "uuid" "value")
+                         :master activity-frame)))
+    (ng:treeview-heading treeview ng:+treeview-first-column-id+ :text "index")
+    (ng:notebook-add activity-frame treeview :text (print-addr address))))
+
+(defun delete-current-tab (nb)
+  (ng:format-wish "~a forget current" (ng:widget-path nb)))
+
+(defun get-tab-text (nb)
+  (ng:with-read-data ()
+    ;; Note to time-travelling self:
+    ;; - if you use "senddata" the result is interpreted as lisp code
+    ;; - this causes the reader to freak out reading the colons in mac address
+    ;; - dont waste 3 hours on a sunday, use "senddatastring"
+    (ng:format-wish "senddatastring [~a tab current -text]" (ng:widget-path nb))
+    ))
+
+(defun get-selected-tab (nb)
+  (log-err (format nil "Deleting ~A" (get-tab-text nb)))
+  (let ((path (ng:with-read-data (nil)
+                (ng:format-wish "senddata [~a select]" (ng:widget-path nb))
+                (ng:read-data))))
+    (when (and path (string/= path ""))
+      path)))
+
+(defun make-connection-object (address)
+  (list :address address))
+
+(defun already-connected (address connections)
+  (find-if (lambda (conn) (= (getf conn :address) address)) connections))
 
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
 
   (let* ((ui-events (make-mailbox "ui events"))
          (content (make-instance 'ng:frame))
-         (activity-frame (make-instance 'ng:frame :master content
-                                                  :height 400))
+         (activity-frame (make-instance 'ng:notebook :master content
+                                                     :height 400))
          (command-frame (make-instance 'ng:frame :master content
                                        ;; :borderwidth 5 :relief :ridge
                                        :width 200))
@@ -160,6 +207,8 @@
          (connection-menu (make-instance 'ng:menu :master menubar :text "Connection"))
          (att-menu (make-instance 'ng:menu :master menubar :text "GATT client"))
          (gatt-server-menu (make-instance 'ng:menu :master menubar :text "GATT server"))
+
+         (connections)
          )
 
     ;; Register quit action
@@ -174,6 +223,8 @@
     (ng:grid command-frame 0 0 :sticky "nsew")
     (ng:grid log-frame 1 0 :columnspan 2 :sticky "nsew")
     (ng:grid log-textview 0 0 :sticky "nsew")
+
+    (ng:notebook-add activity-frame treeview :text "Scanner")
 
     ;; Autosize root window
     (ng:grid-columnconfigure ng:*tk* 0 :weight 1)
@@ -226,7 +277,6 @@
                            :command (lambda () (sort-column :rssi)))
       (ng:treeview-heading treeview "name"
                            :command (lambda () (sort-column :name)))
-      (ng:grid treeview 0 0 :sticky "nsew")
 
       ;; Add devices
       (add-devices-to-treeview (get-scanned-devices *devices*))
@@ -284,7 +334,7 @@
     (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone)
 
     ;; Poll for events
-    ;; TODO: move this to another thread
+    ;; TODO: dispatch host commands in another thread
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
         (log-dbg (format nil "EVT: ~A" evt))
@@ -292,12 +342,22 @@
           (:start-scan t)
           (:stop-scan t)
           (:connect
-           (progn
-             (log-inf
-              (format nil "connect to ~A"
-                      (get-selected-device treeview)))
+           (let ((device (get-selected-device treeview)))
+             (when (and device (not (already-connected (getf device :address) connections)))
+               (log-inf (format nil "connect to ~A" device))
+               (push (make-connection-object (getf device :address)) connections)
+               (make-connection-tab activity-frame (getf device :address)))
              t))
-          (:disconnect t)
+          (:disconnect
+           (let ((name (get-tab-text activity-frame)))
+             (unless (equalp "Scanner" name)
+               (setf connections
+                     (delete-if (lambda (el)
+                                  (= (getf el :address)
+                                     (decode-mac name))) connections))
+               (log-inf (format nil "Disconnecting ~a" name))
+               (delete-current-tab activity-frame))
+             t))
           (:start-adv t)
           (:stop-adv t)
           (:quit nil))))
