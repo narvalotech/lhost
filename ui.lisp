@@ -171,6 +171,12 @@
     (ng:format-wish "senddatastring [~a tab current -text]" (ng:widget-path nb))
     ))
 
+(defun select-latest-tab (nb)
+  (let ((last-index (ng:with-read-data ()
+                      (ng:format-wish "senddata [~a index end]" (ng:widget-path nb)))))
+    (ng:format-wish "~a select ~a" (ng:widget-path nb) (if (zerop last-index) 0
+                                                           (- last-index 1)))))
+
 (defun make-connection-object (address treeview)
   (list :address address :treeview treeview))
 
@@ -361,7 +367,6 @@
     ;; - use real events
     ;;
     ;; connection view
-    ;; - auto-switch to connected tab
     ;; - gatt read: print-to-log oughta be good enough for now
     ;; - gatt write: make a dialog, maybe double-click?
     ;; - show perms per attribute
@@ -418,6 +423,8 @@
                       (getf device :address)
                       (make-connection-tab activity-frame (getf device :address)))
                      connections)
+               ;; Focus new treeview
+               (select-latest-tab activity-frame)
 
                ;; Add a dummy GATT table to test out UI
                (add-gatt-table-to-conn
