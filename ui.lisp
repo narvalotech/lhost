@@ -56,6 +56,42 @@
           (setf (gethash (car el) *devices*)
                 (cadr el))) *testlist*)
 
+(defun make-a-sign (byte)
+  (if (logbitp 7 byte)
+      (- byte (ash 1 8))
+      byte))
+
+(defun decode-scan-report (evt)
+  ;; TODO: handle multiple reports
+  (let ((report (nth 0 (getf (nth 1 evt) :reports))))
+    (list :type (getf report :address-type)
+          :address (decode-c-int (getf report :address))
+          :timestamp 0                  ; later dude
+          :rssi (make-a-sign (getf report :rssi))
+          :data (getf report :data))))
+
+(defun accumulate-scan-reports (dest report)
+  ;; Track the last 10 reports for each address
+  (let ((decoded (decode-scan-report report)))
+    (push decoded (gethash (getf decoded :address) dest))
+    (nbutlast (gethash (getf decoded :address) dest) 10)
+    nil))
+
+(defun extract-name (ad)
+  (ignore-errors                        ; boooo
+   (from-c-string
+    (getf (parse-ad ad) :name-complete))))
+
+(defun make-device-list (devices-dict)
+  (let ((devices))
+    (maphash (lambda (address reports)
+               (declare (ignore address))
+               (let* ((report (nth 0 reports))
+                      (name (extract-name (getf report :data))))
+                 (push (append report (list :name name)) devices)))
+             devices-dict)
+    devices))
+
 (defun parse-name (ad)
   (let* ((parsed (parse-ad ad))
          (encoded-name (or (getf parsed :name-complete)
@@ -120,7 +156,8 @@
        (slot-value (car sel) 'ng:column-values)))))
 
 (defun queue (mailbox event)
-  (sb-concurrency:send-message mailbox event))
+  (when event
+    (sb-concurrency:send-message mailbox event)))
 
 (defun make-menuitem (master text q command-id &optional accelerator)
   (apply #'make-instance
@@ -262,50 +299,82 @@
 (defparameter *cmds* (make-mailbox "ui backend -> host"))
 (defparameter *evts* (make-mailbox "ui backend <- host"))
 
-(defun start-backend-evts-thread ()
-  (bt:make-thread
-   (lambda ()
-     (loop
-       (let ((evt (sb-concurrency:receive-message *evts*)))
-         ;; TODO: cmon, do something!
-         (log-inf "Got evt: ~X" evt))))
-   :name "UI backend <= host"))
-
 (defparameter *controller* (make-controller))
 
-(defun start-backend ()
-  (setf *controller* (make-controller))
-  (start-hci
-   (getf *controller* :tx-mailbox)
-   (getf *controller* :rx-mailbox)
-   (getf *controller* :stop-signal))
-  (bt:make-thread
-   (lambda ()
-     (let ((evts-thread (start-backend-evts-thread)))
-       (loop
-         (let ((cmd (sb-concurrency:receive-message *cmds*)))
-           (log-inf "[T] sending to host: ~X" cmd)
-           (case (car cmd)
-             (:att-read
-              (log-inf "ATT READ"))
-             (:att-write
-              (log-inf "ATT WRITE"))
-             (:quit
-              (progn
-                (log-inf "Exiting UI backend")
-                (ignore-errors (bt:destroy-thread evts-thread))
-                (return nil))))))))
-   :name "UI backend => Host"))
+(defun do-rx-work (hci ui-events)
+  ;; In the future, we'll have to extract data n stuff from here
+  (drain-rxq hci)
+  (loop
+    (let ((packet (receive-rxq hci)))
+      (queue ui-events packet)
+      (if packet
+          (process-hci hci packet)
+          (return-from do-rx-work nil)))))
 
-(defun stop-backend ()
-  (queue *cmds* (list :quit))
-  (stop-hci (getf *controller* :stop-signal))
-  (loop while (drain-mailbox *evts*))
-  (loop while (drain-mailbox *cmds*)))
+(defun start-backend (ui-events)
+  (setf *controller* (make-controller))
+  (list
+   (start-hci
+    (getf *controller* :tx-mailbox)
+    (getf *controller* :rx-mailbox)
+    (getf *controller* :stop-signal))
+   (bt:make-thread
+    (lambda ()
+      (let ((hci *controller*))
+        (loop
+          (let ((cmd (sb-concurrency:receive-message *cmds* :timeout .1)))
+            (when cmd
+              (log-inf "[T] sending to host: ~X" cmd)
+              (case (car cmd)
+                (:init
+                 (log-inf "INIT CONTROLLER")
+                 (init-controller hci))
+
+                (:start-scan
+                 (progn
+                   (log-inf "START SCAN")
+                   (hci-set-scan-param hci)
+                   (hci-set-scan-enable hci t)
+                   ))
+
+                (:stop-scan
+                 (progn
+                   (log-inf "STOP SCAN")
+                   (hci-set-scan-enable hci nil)
+                   ))
+
+                (:att-read
+                 (log-inf "ATT READ"))
+                (:att-write
+                 (log-inf "ATT WRITE"))
+                (:quit
+                 (progn
+                   (log-inf "Exiting UI backend")
+                   (return nil)))))
+            (do-rx-work hci ui-events)
+            ))))
+    :name "UI backend <=> Host")))
+
+(defun stop-backend (backend-thread)
+  (ignore-errors
+   (when backend-thread
+     (queue *cmds* (list :quit))
+     (stop-hci (getf *controller* :stop-signal))
+     (bt:destroy-thread (nth 0 backend-thread))
+     (bt:destroy-thread (nth 1 backend-thread))
+     (sleep .5)
+     )
+   (loop while (drain-mailbox *evts*))
+   (loop while (drain-mailbox *cmds*))
+
+   ;; And a brand-new controller
+   (setf *controller* (make-controller))
+   ))
 
 (defun dispatch-cmd (cmd-id &rest args)
   (log-inf "DISPATCH ~A ARGS ~X" cmd-id args)
-  (queue *cmds* (push cmd-id args)))
+  (queue *cmds* (push cmd-id args))
+  t)
 
 (defun fromhexstream (str)
   (ignore-errors
@@ -322,11 +391,21 @@
     (when peer-table
       (eql (getf (nth (- handle 1) peer-table) :type) :characteristic-descriptor))))
 
-(ng:with-nodgui ()
-  (stop-backend)
-  (sleep .1)
-  (start-backend)
+(defun add-devices-to-treeview (treeview devices)
+  (ng:treeview-delete-all treeview)
+  (loop for device in devices do
+    (ng:treeview-insert-item
+     treeview
+     :id (princ-to-string (getf device :address))
+     :text (print-addr (getf device :address))
+     :tag "tv"
+     :column-values
+     (list
+      (princ-to-string (getf device :rssi))
+      (getf device :name)
+      (px (getf device :data))))))
 
+(ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
 
   (let* ((ui-events (make-mailbox "ui events"))
@@ -353,6 +432,9 @@
          (connections (make-hash-table))
          (previous-gatt-write "")
          (default-cccd-write "01 00")
+         (backend-thread nil)
+         (scanned-devices (make-hash-table))
+         (sort-scan-by :rssi)
          )
 
     ;; Register quit action
@@ -397,22 +479,10 @@
 
     ;; Populate the activity view.
     ;; Set sort functions on column label click
-    (labels ((add-devices-to-treeview (devices)
-               (ng:treeview-delete-all treeview)
-               (loop for device in devices do
-                 (ng:treeview-insert-item
-                  treeview
-                  :id (princ-to-string (getf device :address))
-                  :text (print-addr (getf device :address))
-                  :tag "tv"
-                  :column-values
-                  (list
-                   (princ-to-string (getf device :rssi))
-                   (getf device :name)
-                   (px (getf device :data))))))
-             (sort-column (by)
-               (add-devices-to-treeview
-                (sort-scan (get-scanned-devices *devices*) by))))
+    (labels ((sort-column (by)
+               (setf sort-scan-by by)
+               (add-devices-to-treeview treeview
+                (sort-scan (make-device-list scanned-devices) sort-scan-by))))
 
       (ng:treeview-heading treeview ng:+treeview-first-column-id+
                            :text "MAC"
@@ -423,7 +493,7 @@
                            :command (lambda () (sort-column :name)))
 
       ;; Add devices
-      (add-devices-to-treeview (get-scanned-devices *devices*))
+      (add-devices-to-treeview treeview (get-scanned-devices *devices*))
 
       ;; Autosize column widths
       ;; TODO: fixed column sizes please
@@ -477,14 +547,25 @@
     (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<N>")
     (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone)
 
+    ;; Big business
+    ;; TODO: move that to explicit user action. e.g. START button.
+    (stop-backend nil)
+    (sleep .1)
+
+    (setf backend-thread (start-backend ui-events))
+    (dispatch-cmd :init)
+
     ;; Poll for events
     ;; TODO: dispatch host commands in another thread
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
-        (log-dbg "EVT: ~A" evt)
-        (case evt
-          (:start-scan t)
-          (:stop-scan t)
+        (unless (listp evt)
+          (log-dbg "EVT: ~A" evt))
+        (case (if (listp evt) (car evt) evt)
+          (:start-scan
+           (dispatch-cmd evt))
+          (:stop-scan
+           (dispatch-cmd evt))
           (:connect
            (let ((device (get-selected-device treeview)))
              (when (and device
@@ -542,8 +623,28 @@
           (:stop-adv t)
           (:quit
            (progn
-             (dispatch-cmd :quit)
-             nil)))))
+             ;; TODO: rename this. confusing.
+             (stop-backend (cadr backend-thread))
+             nil))
+
+          ;; HCI event
+          (:evt
+           (progn
+             (case (car (cadr evt))
+               (:le-scan-report
+                (progn
+                  (accumulate-scan-reports scanned-devices (cadr evt))
+                  ;; maybe rebuild on a timer instead?
+                  (add-devices-to-treeview
+                   treeview
+                   (sort-scan
+                    (make-device-list scanned-devices)
+                    sort-scan-by)
+                  )))
+               (:otherwise
+                (log-inf "EVENT: ~X" evt)))
+           t))
+          )))
 
     (log-inf "Exiting UI")
     (ng:exit-nodgui)

@@ -15,7 +15,7 @@
     :err (1 "ERRR")
     ))
 
-(defparameter *current-log-level* :dbg)
+(defparameter *current-log-level* :tra)
 (defparameter *log-time* nil)
 (defparameter *log-lock* (bt:make-lock "logs"))
 (defparameter *log-line-sink*
@@ -843,20 +843,22 @@
   (bt:make-thread
    (lambda ()
      (loop
-       (sb-concurrency:send-message
-        (getf packetizer :rx-mailbox)
-        (receive packetizer))))
+       (ignore-errors
+        (sb-concurrency:send-message
+         (getf packetizer :rx-mailbox)
+         (receive packetizer)))))
    :name "Packetizer RX thread"))
 
 (defun send-in-thread (packetizer)
   (bt:make-thread
    (lambda ()
      (loop
-       (let ((packet
-               (sb-concurrency:receive-message
-                (getf packetizer :tx-mailbox))))
-         (when packet
-           (write-sequence packet (getf packetizer :h2c))))))
+       (ignore-errors
+        (let ((packet
+                (sb-concurrency:receive-message
+                 (getf packetizer :tx-mailbox))))
+          (when packet
+            (write-sequence packet (getf packetizer :h2c)))))))
    :name "Packetizer TX thread"))
 
 (defun wait-next-hci-rx (hci)
@@ -1043,8 +1045,7 @@
     (if (eql (car response) :cmd-status)
         (let* ((status (getf (nth 1 response) :status)))
           (unless (zerop status)
-            (log-dbg (format nil "cmd failed: status 0x~x" status))
-            (break))
+            (log-err (format nil "cmd failed: status 0x~x" status)))
           status)
 
         ;; cmd-complete
@@ -1054,8 +1055,7 @@
 
           (if (not (equal status 0))
               (progn
-                (log-dbg (format nil "cmd failed: status 0x~x" status))
-                (break)))
+                (log-err (format nil "cmd failed: status 0x~x" status))))
 
           (if (equal status 0)
               params
@@ -3032,8 +3032,9 @@
                 (push (send-in-thread packetizer) threads)
                 (push (monitor-thread stop-signal) threads)
                 ;; todo monitor all threads
-                (loop until (find-if-not #'bt:thread-alive-p threads)
-                      do (sleep .5)))
+                (ignore-errors
+                 (loop until (find-if-not #'bt:thread-alive-p threads)
+                       do (sleep .5))))
            (progn
              (log-dbg (format nil "Killing threads: ~A" threads))
              (mapc
