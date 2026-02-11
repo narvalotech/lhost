@@ -271,7 +271,14 @@
          (log-inf "Got evt: ~X" evt))))
    :name "UI backend <= host"))
 
+(defparameter *controller* (make-controller))
+
 (defun start-backend ()
+  (setf *controller* (make-controller))
+  (start-hci
+   (getf *controller* :tx-mailbox)
+   (getf *controller* :rx-mailbox)
+   (getf *controller* :stop-signal))
   (bt:make-thread
    (lambda ()
      (let ((evts-thread (start-backend-evts-thread)))
@@ -292,6 +299,7 @@
 
 (defun stop-backend ()
   (queue *cmds* (list :quit))
+  (stop-hci (getf *controller* :stop-signal))
   (loop while (drain-mailbox *evts*))
   (loop while (drain-mailbox *cmds*)))
 
@@ -532,7 +540,10 @@
 
           (:start-adv t)
           (:stop-adv t)
-          (:quit nil))))
+          (:quit
+           (progn
+             (dispatch-cmd :quit)
+             nil)))))
 
     (log-inf "Exiting UI")
     (ng:exit-nodgui)
