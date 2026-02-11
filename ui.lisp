@@ -259,13 +259,45 @@
         ;; item ID _is_ the handle
         (read-from-string (slot-value (car sel) 'ng:id))))))
 
+(defparameter *cmds* (make-mailbox "ui backend -> host"))
+(defparameter *evts* (make-mailbox "ui backend <- host"))
+
+(defun start-backend-evts-thread ()
+  (bt:make-thread
+   (lambda ()
+     (loop
+       (let ((evt (sb-concurrency:receive-message *evts*)))
+         ;; TODO: cmon, do something!
+         (log-inf "Got evt: ~X" evt))))
+   :name "UI backend <= host"))
+
+(defun start-backend ()
+  (bt:make-thread
+   (lambda ()
+     (let ((evts-thread (start-backend-evts-thread)))
+       (loop
+         (let ((cmd (sb-concurrency:receive-message *cmds*)))
+           (log-inf "[T] sending to host: ~X" cmd)
+           (case (car cmd)
+             (:att-read
+              (log-inf "ATT READ"))
+             (:att-write
+              (log-inf "ATT WRITE"))
+             (:quit
+              (progn
+                (log-inf "Exiting UI backend")
+                (ignore-errors (bt:destroy-thread evts-thread))
+                (return nil))))))))
+   :name "UI backend => Host"))
+
+(defun stop-backend ()
+  (queue *cmds* (list :quit))
+  (loop while (drain-mailbox *evts*))
+  (loop while (drain-mailbox *cmds*)))
+
 (defun dispatch-cmd (cmd-id &rest args)
   (log-inf "DISPATCH ~A ARGS ~X" cmd-id args)
-  (case cmd-id
-    (:att-read
-     (log-inf "ATT READ"))
-    (:att-write
-     (log-inf "ATT WRITE"))))
+  (queue *cmds* (push cmd-id args)))
 
 (defun fromhexstream (str)
   (ignore-errors
@@ -283,6 +315,10 @@
       (eql (getf (nth (- handle 1) peer-table) :type) :characteristic-descriptor))))
 
 (ng:with-nodgui ()
+  (stop-backend)
+  (sleep .1)
+  (start-backend)
+
   (ng:wm-title ng:*tk* "Azul '94")
 
   (let* ((ui-events (make-mailbox "ui events"))
