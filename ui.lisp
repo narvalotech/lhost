@@ -435,6 +435,7 @@
          (backend-thread nil)
          (scanned-devices (make-hash-table))
          (sort-scan-by :rssi)
+         (last-scan-display (get-internal-real-time))
          )
 
     ;; Register quit action
@@ -481,8 +482,7 @@
     ;; Set sort functions on column label click
     (labels ((sort-column (by)
                (setf sort-scan-by by)
-               (add-devices-to-treeview treeview
-                (sort-scan (make-device-list scanned-devices) sort-scan-by))))
+               (queue ui-events :display-scanned-devices)))
 
       (ng:treeview-heading treeview ng:+treeview-first-column-id+
                            :text "MAC"
@@ -627,6 +627,15 @@
              (stop-backend (cadr backend-thread))
              nil))
 
+          (:display-scanned-devices
+           (progn
+             (add-devices-to-treeview
+              treeview
+              (sort-scan
+               (make-device-list scanned-devices)
+               sort-scan-by))
+             t))
+
           ;; HCI event
           (:evt
            (progn
@@ -634,13 +643,9 @@
                (:le-scan-report
                 (progn
                   (accumulate-scan-reports scanned-devices (cadr evt))
-                  ;; maybe rebuild on a timer instead?
-                  (add-devices-to-treeview
-                   treeview
-                   (sort-scan
-                    (make-device-list scanned-devices)
-                    sort-scan-by)
-                  )))
+                  (when (> (- (get-internal-real-time) last-scan-display) 10000)
+                    (setf last-scan-display (get-internal-real-time))
+                    (queue ui-events :display-scanned-devices))))
                (:otherwise
                 (log-inf "EVENT: ~X" evt)))
            t))
