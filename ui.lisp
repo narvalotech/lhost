@@ -86,7 +86,8 @@
  ; => "F8:9D:C5:2A:5C:01"
 
 (defun decode-mac (address-string)
-  (parse-integer (remove #\: address-string) :radix 16))
+  (ignore-errors
+   (parse-integer (remove #\: address-string) :radix 16)))
 
 ;; look ma! end-to-end testing!
 (print-addr (decode-mac (print-addr #xF89DC52A5C01)))
@@ -252,10 +253,11 @@
       (add-gatt-table-to-treeview (getf conn :treeview) gatt-table))))
 
 (defun get-selected-attribute (treeview)
-  (let ((sel (ng:treeview-get-selection treeview)))
-    (when sel
-      ;; item ID _is_ the handle
-      (read-from-string (slot-value (car sel) 'ng:id)))))
+  (when treeview
+    (let ((sel (ng:treeview-get-selection treeview)))
+      (when sel
+        ;; item ID _is_ the handle
+        (read-from-string (slot-value (car sel) 'ng:id))))))
 
 (defun dispatch-cmd (cmd-id &rest args)
   (log-inf "DISPATCH ~A ARGS ~X" cmd-id args)
@@ -270,7 +272,10 @@
    (with-input-from-string (is str)
      (loop for i from 0 below (length str) by 3
            collect
-           (parse-integer (subseq str i (min (+ i 2) (length str))) :radix 16)))))
+           (let ((parsed
+                   (parse-integer (subseq str i (min (+ i 2) (length str))) :radix 16)))
+             (when (< parsed #x100)
+               parsed))))))
 
 (defun cccd? (conn handle)
   (let ((peer-table (getf conn :gatt-table)))
