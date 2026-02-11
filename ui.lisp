@@ -181,9 +181,6 @@
 (defun make-connection-object (address treeview)
   (list :address address :treeview treeview))
 
-(defun already-connected (address connections)
-  (find-if (lambda (conn) (= (getf conn :address) address)) connections))
-
 ;; From a real device (okay zephyr sample but still..)
 (defparameter *sample-gatt*
   '((:HANDLE 1 :TYPE :SERVICE :END-HANDLE 8 :UUID 6145)
@@ -248,12 +245,10 @@
                    (format-uuid (getf attribute :uuid))
                    (format-attribute-data attribute)))))
 
-(defun lookup-conn (address connections)
-  (find-if (lambda (c) (= (getf c :address) address)) connections))
-
 (defun add-gatt-table-to-conn (address gatt-table connections)
-  (let* ((conn (lookup-conn address connections)))
+  (let* ((conn (gethash address connections)))
     (when conn
+      (setf (getf (gethash address connections) :gatt-table) gatt-table)
       (add-gatt-table-to-treeview (getf conn :treeview) gatt-table))))
 
 (defun get-selected-attribute (treeview)
@@ -276,6 +271,11 @@
      (loop for i from 0 below (length str) by 3
            collect
            (parse-integer (subseq str i (min (+ i 2) (length str))) :radix 16)))))
+
+(defun cccd? (conn handle)
+  (let ((peer-table (getf conn :gatt-table)))
+    (when peer-table
+      (eql (getf (nth (- handle 1) peer-table) :type) :characteristic-descriptor))))
 
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
@@ -301,8 +301,9 @@
          (att-menu (make-instance 'ng:menu :master menubar :text "GATT client"))
          (gatt-server-menu (make-instance 'ng:menu :master menubar :text "GATT server"))
 
-         (connections)
+         (connections (make-hash-table))
          (previous-gatt-write "")
+         (default-cccd-write "01 00")
          )
 
     ;; Register quit action
@@ -391,14 +392,13 @@
     ;;
     ;; connection view
     ;; - show perms per attribute
-    ;; - gatt subscribe
     ;;
     ;;MVP: adv and gatts can be a text file
     ;; - advertising data editor
     ;; - gatt server editor
     ;;
     ;; - encryption
-    ;;   - delete bonds
+    ;;   - delete bonds (backup before)
     ;;   - save/restore bonds (save to app dir)
     ;;
     ;; misc
@@ -439,14 +439,16 @@
           (:stop-scan t)
           (:connect
            (let ((device (get-selected-device treeview)))
-             (when (and device (not (already-connected (getf device :address) connections)))
+             (when (and device
+                        (not (gethash (getf device :address) connections)))
                (log-inf "connect to ~A" device)
 
                ;; Build treeview and store it along with address in the connection list
-               (push (make-connection-object
-                      (getf device :address)
-                      (make-connection-tab activity-frame (getf device :address)))
-                     connections)
+               (setf
+                (gethash (getf device :address) connections)
+                (make-connection-object
+                 (getf device :address)
+                 (make-connection-tab activity-frame (getf device :address))))
                ;; Focus new treeview
                (select-latest-tab activity-frame)
 
@@ -457,17 +459,15 @@
           (:disconnect
            (let ((name (get-tab-text activity-frame)))
              (unless (equalp "Scanner" name)
-               (setf connections
-                     (delete-if (lambda (el)
-                                  (= (getf el :address)
-                                     (decode-mac name))) connections))
+               (ignore-errors
+                (remhash (decode-mac name) connections))
                (log-inf "Disconnecting ~a" name)
                (delete-current-tab activity-frame))
              t))
 
           (:att-read
            (let* ((tab-name (get-tab-text activity-frame))
-                  (conn (lookup-conn (decode-mac tab-name) connections))
+                  (conn (gethash (decode-mac tab-name) connections))
                   (handle (get-selected-attribute (getf conn :treeview))))
              (when handle
                (log-inf "[~A] att-read ~4,'0,X" tab-name handle)
@@ -475,20 +475,20 @@
              t))
           (:att-write
            (let* ((tab-name (get-tab-text activity-frame))
-                  (conn (lookup-conn (decode-mac tab-name) connections))
+                  (conn (gethash (decode-mac tab-name) connections))
                   (handle (get-selected-attribute (getf conn :treeview))))
              (when handle
                (log-inf "[~A] att-write ~4,'0,X" tab-name handle)
-               (let* ((data
+               (let* ((cccd (cccd? conn handle))
+                      (data
                         (nodgui.mw:text-input-dialog
                          content "GATT Write" "GATT Write Data (e,g, 01 ef 32 c1)"
-                         :text previous-gatt-write))
+                         :text (if cccd default-cccd-write previous-gatt-write)))
                       (parsed-data (fromhexstream data)))
                  (when parsed-data
-                   (setf previous-gatt-write data)
+                   (unless cccd (setf previous-gatt-write data))
                    (dispatch-cmd :att-write (getf conn :address) handle data))))
              t))
-          (:att-sub t)
 
           (:start-adv t)
           (:stop-adv t)
