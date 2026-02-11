@@ -406,27 +406,26 @@
     ;; - mitm +view
 
     ;; Scan menu
-    (make-menuitem scan-menu "Scan" ui-events :start-scan "<Control-s>")
-    (make-menuitem scan-menu "Stop scan" ui-events :stop-scan "<Control-S>")
+    (make-menuitem scan-menu "Scan" ui-events :start-scan "<s>")
+    (make-menuitem scan-menu "Stop scan" ui-events :stop-scan "<S>")
     (make-menuitem scan-menu "Connect" ui-events :connect "<c>")
 
     ;; In-connection menu
-    (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<Control-d>")
-    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<Control-e>")
+    (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<d>")
+    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<e>")
 
-    (make-menuitem connection-menu "Bond" ui-events :bond "<Control-b>")
-    (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<Control-u>")
-    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<Control-m>")
+    (make-menuitem connection-menu "Bond" ui-events :bond "<b>")
+    (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<u>")
+    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<m>")
 
     ;; GATT client
-    (make-menuitem att-menu "Read" ui-events :att-read "<Control-r>")
-    (make-menuitem att-menu "Write" ui-events :att-write "<Control-w>")
-    (make-menuitem att-menu "Subscribe" ui-events :att-sub "<Control-x>")
+    (make-menuitem att-menu "Read" ui-events :att-read "<r>")
+    (make-menuitem att-menu "Write" ui-events :att-write "<w>")
 
     ;; GATT server
-    (make-menuitem gatt-server-menu "Read" ui-events :gatt-server-get "<Control-R>")
-    (make-menuitem gatt-server-menu "Write" ui-events :gatt-server-set "<Control-W>")
-    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<Control-N>")
+    (make-menuitem gatt-server-menu "Read" ui-events :gatt-server-get "<R>")
+    (make-menuitem gatt-server-menu "Write" ui-events :gatt-server-set "<W>")
+    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<N>")
     (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone)
 
     ;; Poll for events
