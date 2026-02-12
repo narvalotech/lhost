@@ -4,31 +4,6 @@
 (setf nodgui:*default-theme* "default")
 (sb-ext:add-package-local-nickname :ng :nodgui)
 
-;; SCAN MVP:
-;;
-;; - two panes:
-;;   - button palette on left side
-;;   - scan results on the right side
-;;
-;; for now:
-;; - use synthetic scan results
-;;
-;; real data:
-;; - start scan
-;; - receive-if :scan-rsp
-;;   - collect all scan-rsp by address
-;;   - have summarizing fn to merge all into a single entry
-;;
-;; scan result (ie device) is
-;; - address
-;; - last rssi
-;; - last name
-;; - merged data
-;;
-;; filters:
-;; - have manuf-data (ie garmin)
-;; - have uuids
-;; - connectable
 (defparameter *devices* (make-hash-table))
 (defparameter *testlist*
   (list
@@ -499,16 +474,6 @@
       ;; TODO: fixed column sizes please
       (ng:treeview-refit-columns-width treeview))
 
-    ;; TODO:
-    ;; - spawn a thread for RX HCI events
-    ;; - give it the 'ui-events mailbox
-    ;; - return that TID so we can terminate it when we quit
-    ;; - that thread puts host events on the mailbox
-    ;; - we handle them just like UI events
-
-    ;; Remaining work
-    ;; - use real cmds/events
-    ;;
     ;; connection view
     ;; - show perms per attribute
     ;;
@@ -519,6 +484,11 @@
     ;; - encryption
     ;;   - delete bonds (backup before)
     ;;   - save/restore bonds (save to app dir)
+    ;;
+    ;; scan filters:
+    ;; - have manuf-data (ie garmin)
+    ;; - have uuids
+    ;; - connectable
     ;;
     ;; misc
     ;; - gatt table clone
@@ -556,7 +526,6 @@
     (dispatch-cmd :init)
 
     ;; Poll for events
-    ;; TODO: dispatch host commands in another thread
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
         (unless (listp evt)
