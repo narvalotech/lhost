@@ -4,33 +4,6 @@
 (setf nodgui:*default-theme* "default")
 (sb-ext:add-package-local-nickname :ng :nodgui)
 
-(defparameter *devices* (make-hash-table))
-(defparameter *testlist*
-  (list
-   (list #xF89DC52A5C01 (list :rssi -128
-                              :timestamp 0
-                              :data (append
-                                     (make-ad :flags '(#x01))
-                                     (make-ad-name "Nose Thermometer 800"))))
-   (list #xF89DC52A5202 (list :rssi -69
-                              :timestamp 12312
-                              :data (append
-                                     (make-ad :flags '(#x01))
-                                     (make-ad-name "Delorean audio"))))
-   (list #xF89DC52A5202 (list :rssi -80
-                              :timestamp 12319
-                              :data (append
-                                     (make-ad :flags '(#x01))
-                                     (make-ad-name "overwrites"))))
-   (list #xF89DD2215203 (list :rssi -42
-                              :timestamp 10319
-                              :data (append
-                                     (make-ad :flags '(#x01))
-                                     (make-ad-name "HeartRate Sensor 100"))))))
-(mapcar (lambda (el)
-          (setf (gethash (car el) *devices*)
-                (cadr el))) *testlist*)
-
 (defun make-a-sign (byte)
   (if (logbitp 7 byte)
       (- byte (ash 1 8))
@@ -75,20 +48,6 @@
         (from-c-string encoded-name)
         "")))
 
-;; Returns a list of address + rssi + name + data
-(defun get-scanned-devices (devices &key (order-by :rssi))
-  (declare (ignore order-by))
-  (let ((devs))
-    (maphash (lambda (address details)
-               (push (list :address address
-                           :name (parse-name (getf details :data))
-                           :rssi (getf details :rssi)
-                           :timestamp (getf details :timestamp)
-                           :data (getf details :data))
-                     devs))
-             devices)
-    devs))
-
 (defun print-addr (address)
   (format nil "~{~2,'0X~^:~}"
           (subseq (make-c-int :u64 address t) 2)))
@@ -103,16 +62,6 @@
 ;; look ma! end-to-end testing!
 (print-addr (decode-mac (print-addr #xF89DC52A5C01)))
  ; => "F8:9D:C5:2A:5C:01"
-
-(get-scanned-devices *devices*)
- ; => ((:ADDRESS 273356718952963 :NAME "HeartRate Sensor 100" :RSSI -42 :DATA
- ;  (2 1 1 21 9 72 101 97 114 116 82 97 116 101 32 83 101 110 115 111 114 32 49
- ;   48 48))
- ; (:ADDRESS 273356501438978 :NAME "overwrites" :RSSI -80 :DATA
- ;  (2 1 1 11 9 111 118 101 114 119 114 105 116 101 115))
- ; (:ADDRESS 273356501441537 :NAME "Nose Thermometer 800" :RSSI -128 :DATA
- ;  (2 1 1 21 9 78 111 115 101 32 84 104 101 114 109 111 109 101 116 101 114 32
- ;   56 48 48)))
 
 (defun make-button (frame text command)
   (make-instance 'ng:button
@@ -496,9 +445,6 @@
                            :command (lambda () (sort-column :rssi)))
       (ng:treeview-heading treeview "name"
                            :command (lambda () (sort-column :name)))
-
-      ;; Add devices
-      (add-devices-to-treeview treeview (get-scanned-devices *devices*))
 
       ;; Autosize column widths
       ;; TODO: fixed column sizes please
