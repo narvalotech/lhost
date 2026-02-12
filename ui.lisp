@@ -39,7 +39,7 @@
 (defun decode-scan-report (evt)
   ;; TODO: handle multiple reports
   (let ((report (nth 0 (getf (nth 1 evt) :reports))))
-    (list :type (getf report :address-type)
+    (list :address-type (getf report :address-type)
           :address (decode-c-int (getf report :address))
           :timestamp 0                  ; later dude
           :rssi (make-a-sign (getf report :rssi))
@@ -191,8 +191,14 @@
     (ng:format-wish "~a select ~a" (ng:widget-path nb) (if (zerop last-index) 0
                                                            (- last-index 1)))))
 
-(defun make-connection-object (address treeview)
-  (list :address address :treeview treeview))
+(defun make-connection-object (address-with-type handle treeview)
+  (list :address-with-type address-with-type :handle handle :treeview treeview))
+
+(defun handle->address (hci-handle connections)
+  (maphash (lambda (address obj)
+             (when (= (getf obj :handle) hci-handle)
+               (return-from handle->address address)))
+           connections))
 
 ;; From a real device (okay zephyr sample but still..)
 (defparameter *sample-gatt*
@@ -286,6 +292,12 @@
           (process-hci hci packet)
           (return-from do-rx-work nil)))))
 
+(defun encode-address (address)
+  (list
+   :address
+   (subseq (make-c-int :u64 (getf address :address)) 0 6)
+   :type (getf address :type)))
+
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
   (list
@@ -309,15 +321,28 @@
                  (progn
                    (log-inf "START SCAN")
                    (hci-set-scan-param hci)
-                   (hci-set-scan-enable hci t)
-                   ))
-
+                   (hci-set-scan-enable hci t)))
                 (:stop-scan
                  (progn
                    (log-inf "STOP SCAN")
-                   (hci-set-scan-enable hci nil)
-                   ))
+                   (hci-set-scan-enable hci nil)))
 
+                (:connect
+                 (let ((address (nth 1 cmd)))
+                   (log-inf "CONNECT ~X" address)
+                   (hci-set-scan-enable hci nil)
+                   (hci-create-connection hci (encode-address address))))
+                (:disconnect
+                 (let ((conn-handle (nth 1 cmd)))
+                   (log-inf "DISCONNECT")
+                   (hci-disconnect hci conn-handle)))
+
+                (:discover-gatt
+                 (let* ((conn-handle (nth 1 cmd))
+                        (gattc-table (gattc-discover hci conn-handle)))
+                   (queue ui-events (list :gatt-discovery-end
+                                          conn-handle
+                                          gattc-table))))
                 (:att-read
                  (log-inf "ATT READ"))
                 (:att-write
@@ -379,6 +404,11 @@
       (princ-to-string (getf device :rssi))
       (getf device :name)
       (px (getf device :data))))))
+
+(defun extract-addr-from-report (report)
+  (make-address
+   (getf report :address)
+   (getf report :address-type)))
 
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
@@ -493,6 +523,9 @@
     ;; misc
     ;; - gatt table clone
     ;; - mitm +view
+    ;;
+    ;; Host hookup
+    ;; - advertising start/stop
 
     ;; Scan menu
     (make-menuitem scan-menu "Scan" ui-events :start-scan "<s>")
@@ -529,7 +562,7 @@
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
         (unless (listp evt)
-          (log-dbg "EVT: ~A" evt))
+          (log-dbg "UI-EVT: ~A" evt))
         (case (if (listp evt) (car evt) evt)
           (:start-scan
            (dispatch-cmd evt))
@@ -539,28 +572,20 @@
            (let ((device (get-selected-device treeview)))
              (when (and device
                         (not (gethash (getf device :address) connections)))
-               (log-inf "connect to ~A" device)
-
-               ;; Build treeview and store it along with address in the connection list
-               (setf
-                (gethash (getf device :address) connections)
-                (make-connection-object
-                 (getf device :address)
-                 (make-connection-tab activity-frame (getf device :address))))
-               ;; Focus new treeview
-               (select-latest-tab activity-frame)
-
-               ;; Add a dummy GATT table to test out UI
-               (add-gatt-table-to-conn
-                (getf device :address) *sample-gatt* connections))
+               (let* ((reports (gethash (getf device :address) scanned-devices))
+                      (address-with-type (extract-addr-from-report (nth 0 reports))))
+                 (when address-with-type
+                   (dispatch-cmd :connect address-with-type))))
              t))
           (:disconnect
            (let ((name (get-tab-text activity-frame)))
              (unless (equalp "Scanner" name)
                (ignore-errors
-                (remhash (decode-mac name) connections))
-               (log-inf "Disconnecting ~a" name)
-               (delete-current-tab activity-frame))
+                (let ((handle (getf (gethash (decode-mac name) connections) :handle)))
+                  (log-inf "Disconnecting ~a" name)
+                  (remhash (decode-mac name) connections)
+                  (delete-current-tab activity-frame)
+                  (dispatch-cmd :disconnect handle))))
              t))
 
           (:att-read
@@ -605,6 +630,13 @@
                sort-scan-by))
              t))
 
+          (:gatt-discovery-end
+           (let* ((conn-handle (nth 1 evt))
+                  (table (nth 2 evt))
+                  (address (handle->address conn-handle connections)))
+             (add-gatt-table-to-conn address table connections)
+             t))
+
           ;; HCI event
           (:evt
            (progn
@@ -615,6 +647,28 @@
                   (when (> (- (get-internal-real-time) last-scan-display) 10000)
                     (setf last-scan-display (get-internal-real-time))
                     (queue ui-events :display-scanned-devices))))
+
+               (:le-enh-conn-complete
+                (let* ((data (cadr (cadr evt)))
+                       (conn-handle (getf data :handle))
+                       (address-with-type (make-address
+                                           (decode-c-int (getf data :peer-address) :u64)
+                                           (getf data :peer-address-type)))
+                       (address (getf address-with-type :address)))
+
+                  ;; Build treeview, store it along with address and handle
+                  (setf
+                   (gethash address connections)
+                   (make-connection-object
+                    address-with-type conn-handle (make-connection-tab activity-frame address)))
+
+                  ;; Focus new treeview
+                  (select-latest-tab activity-frame)
+
+                  ;; Kick off GATT discovery
+                  (dispatch-cmd :discover-gatt conn-handle)
+                  ))
+
                (:otherwise
                 (log-inf "EVENT: ~X" evt)))
            t))

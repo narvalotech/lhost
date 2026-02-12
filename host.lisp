@@ -15,7 +15,7 @@
     :err (1 "ERRR")
     ))
 
-(defparameter *current-log-level* :tra)
+(defparameter *current-log-level* :dbg)
 (defparameter *log-time* nil)
 (defparameter *log-lock* (bt:make-lock "logs"))
 (defparameter *log-line-sink*
@@ -456,6 +456,13 @@
 
 (evt-cmd-status '(#x1 #x1 #x3 #xc))
  ; => (:CMD-STATUS (:STATUS 1 :NCMD 1 :OPCODE 3075))
+
+(defun decode-adv-addr-type (type)
+  (case (logand type #b11)
+    (#b00 :public)
+    (#b01 :random)
+    (#b10 :public-rpa)
+    (#b11 :random-rpa)))
 
 (defun decode-adv-report (payload)
   (let* ((num-reports (pull-int payload :u8))
@@ -1299,6 +1306,14 @@
           (return-from wait-for-scan-report
             (list :type (getf report :address-type)
                   :address (getf report :address))))))))
+
+(defun decode-random-addr-type (raw-address)
+  "Decode the address type from just the 6 MAC bytes"
+  (case (ldb (byte 2 46) raw-address)
+    (#x00 :nrpa)
+    (#x01 :rpa)
+    (#x10 :rfu)
+    (#x11 :static)))
 
 (defun make-address (address type)
   (list :address address
