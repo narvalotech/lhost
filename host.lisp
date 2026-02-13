@@ -1183,9 +1183,9 @@
         :class-uuid-128-incomplete #x06
         :class-uuid-128-complete #x07
 
-        :sollicitation-uuid-16 #x14
-        :sollicitation-uuid-32 #x1f
-        :sollicitation-uuid-128 #x15
+        :solicitation-uuid-16 #x14
+        :solicitation-uuid-32 #x1f
+        :solicitation-uuid-128 #x15
 
         :data-uuid-16 #x16
         :data-uuid-32 #x20
@@ -1267,6 +1267,48 @@
   (append
    (make-ad :flags '(#x01)) ; LE General discoverable
    (make-ad-name "Bluey McBleface")))
+
+(defun rmx (uuidstr)
+  (let ((idx (search "xxxx" uuidstr :test #'equalp)))
+    (if idx
+        (replace uuidstr "0000" :start1 idx :end1 (+ idx 4))
+        uuidstr)))
+
+(defun parse-uuid-128 (uuidstr)
+  (let ((uuidstr (remove #\- (rmx uuidstr))))
+    (loop for i from 0 below (length uuidstr) by 2
+          for two-chars = (subseq uuidstr i (min (+ i 2) (length uuidstr)))
+          when two-chars
+            collect (parse-integer two-chars :radix 16))))
+
+(defun parse-uuid (uuidstr)
+  (if (= 2 (length uuidstr))
+      (make-c-int :u16 (parse-integer uuidstr :radix 16))
+      (reverse (parse-uuid-128 uuidstr))))
+
+(defconstant +nus-uuid+ "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+(defconstant +battery-uuid+ "180F")
+(px (parse-uuid +nus-uuid+))
+ ; => "9E CA DC 24 0E E5 A9 E0 93 F3 A3 B5 01 00 40 6E"
+(px (parse-uuid +battery-uuid+))
+ ; => "0F 18"
+
+(defun make-ad-solicited-uuid (uuid-strings &key (type :u16))
+  "List of UUID strings to be solicited. 16b and 128b are supported."
+  (let ((uuids (mapcar #'parse-uuid uuid-strings)))
+    (make-ad (if (eql type :u16)
+                 :solicitation-uuid-16
+                 :solicitation-uuid-128) (apply #'nconc uuids))))
+
+(px (make-ad-solicited-uuid (list +nus-uuid+) :type :u128))
+ ; => "11 15 9E CA DC 24 0E E5 A9 E0 93 F3 A3 B5 01 00 40 6E"
+
+(px (make-ad-solicited-uuid (list +battery-uuid+) :type :u16))
+ ; => "03 14 0F 18"
+
+(defun make-ad-mfg (manufacturer-id payload)
+  (make-ad :manufacturer-specific
+           (append (make-c-int :u16 manufacturer-id) payload)))
 
 (defun parse-ad (input)
   (let ((encoded (copy-tree input))
