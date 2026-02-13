@@ -499,13 +499,19 @@
     ;; - have manuf-data (ie garmin)
     ;; - have uuids
     ;; - connectable
+    ;; - name glob
     ;;
     ;; misc
     ;; - gatt table clone
     ;; - mitm +view
+    ;; - serial port path
+    ;; - serial port open/close buttons
+    ;; - copy data fields to clipboard
     ;;
     ;; Host hookup
     ;; - advertising start/stop
+    ;; - gatt read/write
+    ;; - implement cancel-connection (disconnect button on Scanner view)
 
     ;; Scan menu
     (make-menuitem scan-menu "Scan" ui-events :start-scan "<s>")
