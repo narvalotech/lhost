@@ -354,7 +354,7 @@
    ))
 
 (defun dispatch-cmd (cmd-id &rest args)
-  (log-inf "DISPATCH ~A ARGS ~X" cmd-id args)
+  (log-inf "DISPATCH ~A~A" cmd-id (if args (format nil " ARGS ~X" args) ""))
   (queue *cmds* (push cmd-id args))
   t)
 
