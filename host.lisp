@@ -1902,7 +1902,8 @@
      (list :name name))))
 
 (defun read-spy (conn handle)
-  (log-dbg (format nil "GATTS-READ: conn ~X handle ~X" conn handle)))
+  (log-dbg (format nil "GATTS-READ: conn ~X handle ~X" conn handle))
+  (make-c-int :u8 0))
 
 (defun write-spy (conn handle data)
   (log-dbg (format nil "GATTS-WRITE: conn ~X handle ~X data ~X" conn handle data)))
@@ -2216,13 +2217,14 @@
       (gatt-find-service table nil search-start search-end)
     (if start
         (let* ((read-fn (getf (nth (- start 1) table) :read))
-               (svc-uuid (decode-c-int (funcall read-fn 0 start))))
+               (svc-uuid (decode-c-int (funcall read-fn 0 start)))
+               (uuid-size (get-uuid-size svc-uuid)))
           (att-make-packet :read-by-group-type-rsp
                            (append
-                            (make-c-int :u8 (+ 2 2 2))
+                            (make-c-int :u8 (+ 2 2 uuid-size))
                             (make-c-int :u16 start)
                             (make-c-int :u16 end)
-                            (make-c-int :u16 svc-uuid))))
+                            (make-uint uuid-size svc-uuid))))
         (att-error-rsp :read-by-group-type-req
                        0 :attribute-not-found))))
 
@@ -2237,21 +2239,35 @@
         (att-error-rsp
          :read-by-group-type-req 0 :request-not-supported))))
 
+(defun get-uuid-size (uuid)
+  ;; Here uuid is a number, not a list
+  (if (< uuid #x10000) 2 16))
+
+(get-uuid-size #x1230)
+ ; => 2 (2 bits, #x2, #o2, #b10)
+(get-uuid-size #x6E400001B5A3F393E0A9E50E24DCCA9E)
+ ; => 16 (5 bits, #x10, #o20, #b10000)
+
 (defun gatts-find-info-rsp (table start end)
-  (let ((information-data
-          (when (>= (length table) start)
-            (apply #'nconc
-                   (mapcar
-                    (lambda (a)
-                      (append (make-c-int :u16 (getf a :handle))
-                              (make-c-int :u16 (getf a :uuid))))
-                    (subseq table
-                            (- (min (length table) start) 1)
-                            (min (length table) end)))))))
+  (let* ((uuid-size)
+         (information-data
+           (when (>= (length table) start)
+             (apply #'nconc
+                    (mapcar
+                     (lambda (a)
+                       (unless uuid-size
+                         (setf uuid-size (get-uuid-size (getf a :uuid))))
+                       (when (= uuid-size (get-uuid-size (getf a :uuid)))
+                         (append (make-c-int :u16 (getf a :handle))
+                                 (make-c-int :u16 (getf a :uuid)))))
+                     (subseq table
+                             (- (min (length table) start) 1)
+                             (min (length table) end)))))))
     (if information-data
         (att-make-packet :find-information-rsp
                          (append
-                          (make-c-int :u8 #x01)
+                          (make-c-int :u8
+                                      (if (= uuid-size 2) #x01 #x02))
                           information-data))
         (att-error-rsp :find-information-req
                        start :attribute-not-found))))
@@ -2294,7 +2310,7 @@
         (att-make-packet :read-rsp rsp)
         (att-make-packet :error-rsp
                          (append
-                          (att-make-opcode :write-req)
+                          (att-make-opcode :read-req)
                           (make-c-int :u16 handle)
                           (make-c-int :u8 (att-make-error rsp)))))))
 
