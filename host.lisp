@@ -15,7 +15,7 @@
     :err (1 "ERRR")
     ))
 
-(defparameter *current-log-level* :dbg)
+(defparameter *current-log-level* :tra)
 (defparameter *log-time* nil)
 (defparameter *log-lock* (bt:make-lock "logs"))
 (defparameter *log-line-sink*
@@ -857,6 +857,10 @@
          (receive packetizer)))))
    :name "Packetizer RX thread"))
 
+(defun write-dumdum (data stream)
+  (loop for byte in data
+          do (write-byte byte stream)))
+
 (defun send-in-thread (packetizer)
   (bt:make-thread
    (lambda ()
@@ -866,7 +870,10 @@
                 (sb-concurrency:receive-message
                  (getf packetizer :tx-mailbox))))
           (when packet
-            (write-sequence packet (getf packetizer :h2c)))))))
+            (log-trace "HWTX: ~X" packet)
+            (write-dumdum packet (getf packetizer :h2c))
+            (log-trace "HWTX OK")
+            )))))
    :name "Packetizer TX thread"))
 
 (defun wait-next-hci-rx (hci)
@@ -1031,6 +1038,16 @@
          (let ((,instance (make-hci-packetizer ,h2c ,c2h)))
            (progn ,@body)
          )))))
+
+(ql:quickload :cserial-port)
+
+(defmacro with-serial-packetizer (instance serial-port-path &body body)
+  `(cserial-port:with-serial
+       (rs ,serial-port-path :baud-rate 115200 :data-bits 8 :stop-bits 1 :parity :none)
+     (let* ((serial-stream (cserial-port:make-serial-stream rs))
+            (,instance (make-hci-packetizer serial-stream serial-stream)))
+       (progn ,@body)
+       )))
 
 ;; (with-bsim sim *bs-rx-path* *bs-tx-path*
 ;;   (log-dbg (format nil "connected to PHY (rx ~A tx ~A)"
@@ -3095,7 +3112,7 @@
 
   (bt:make-thread
    (lambda ()
-     (with-packetizer packetizer *h2c-path* *c2h-path*
+     (with-serial-packetizer packetizer "/dev/ttyACM0"
        (setf (getf packetizer :rx-mailbox) c2h-mailbox)
        (setf (getf packetizer :tx-mailbox) h2c-mailbox)
 
