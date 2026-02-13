@@ -256,7 +256,10 @@
     (getf *controller* :stop-signal))
    (bt:make-thread
     (lambda ()
-      (let ((hci *controller*))
+      (let ((hci *controller*)
+            (*active-conns*)
+            (*bonds* (make-hash-table))
+            (bonds-stash))
         (loop
           (let ((cmd (sb-concurrency:receive-message *cmds* :timeout .1)))
             (when cmd
@@ -285,6 +288,33 @@
                  (let ((conn-handle (nth 1 cmd)))
                    (log-inf "DISCONNECT")
                    (hci-disconnect hci conn-handle)))
+
+                (:clear-security
+                 (let ((conn-handle (nth 1 cmd))
+                       (peer-address (nth 2 cmd)))
+                   ;; Clear SMP context
+                   (setf (get-smp-context conn-handle) '())
+
+                   ;; SMP also reads *active-conns* for addresses
+                   (setf (getf (getf *active-conns* conn-handle) :our-address)
+                         (make-address (getf hci :random-address) #x01))
+                   (setf (getf (getf *active-conns* conn-handle) :address)
+                         peer-address)))
+                (:bond
+                 (let ((conn-handle (nth 1 cmd)))
+                   (log-inf "BOND")
+                   (start-security hci conn-handle)))
+                (:stash-bonds
+                 (progn
+                   (log-inf "STASH BONDS")
+                   (setf bonds-stash *bonds*)
+                   (setf *bonds* (make-hash-table))))
+                (:unstash-bonds
+                 (progn
+                   (log-inf "UN-STASH BONDS")
+                   (when bonds-stash
+                     (setf *bonds* bonds-stash)
+                     (setf bonds-stash nil))))
 
                 (:discover-gatt
                  (let* ((conn-handle (nth 1 cmd))
@@ -318,6 +348,7 @@
 
    ;; And a brand-new controller
    (setf *controller* (make-controller))
+   (log-inf "KILLED ALL THREADS")
    ))
 
 (defun dispatch-cmd (cmd-id &rest args)
@@ -359,6 +390,7 @@
    (getf report :address)
    (getf report :address-type)))
 
+(setf *bonds* (make-hash-table))
 (ng:with-nodgui ()
   (ng:wm-title ng:*tk* "Azul '94")
 
@@ -480,11 +512,14 @@
 
     ;; In-connection menu
     (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<d>")
-    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<e>")
-
-    (make-menuitem connection-menu "Bond" ui-events :bond "<b>")
     (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<u>")
     (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<m>")
+
+    ;; Security
+    (make-menuitem connection-menu "Bond" ui-events :bond "<b>")
+    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<e>")
+    (make-menuitem connection-menu "Stash bonds" ui-events :stash-bonds "<Control-b>")
+    (make-menuitem connection-menu "Unstash bonds" ui-events :unstash-bonds "<Control-B>")
 
     ;; GATT client
     (make-menuitem att-menu "Read" ui-events :att-read "<r>")
@@ -534,6 +569,25 @@
                   (dispatch-cmd :disconnect handle))))
              t))
 
+          (:bond
+           (let ((name (get-tab-text activity-frame)))
+             (unless (equalp "Scanner" name)
+               (ignore-errors
+                (let ((handle (getf (gethash (decode-mac name) connections) :handle)))
+                  (log-inf "Bonding ~a" name)
+                  (dispatch-cmd :bond handle))))
+             t))
+
+          (:stash-bonds
+           (progn
+             (dispatch-cmd :stash-bonds)
+             t))
+
+          (:unstash-bonds
+           (progn
+             (dispatch-cmd :unstash-bonds)
+             t))
+
           (:att-read
            (let* ((tab-name (get-tab-text activity-frame))
                   (conn (gethash (decode-mac tab-name) connections))
@@ -564,7 +618,7 @@
           (:quit
            (progn
              ;; TODO: rename this. confusing.
-             (stop-backend (cadr backend-thread))
+             (stop-backend backend-thread)
              nil))
 
           (:display-scanned-devices
@@ -611,13 +665,26 @@
                   ;; Focus new treeview
                   (select-latest-tab activity-frame)
 
+                  ;; Reset SMP context
+                  (dispatch-cmd :clear-security conn-handle address-with-type)
+
                   ;; Kick off GATT discovery
                   (dispatch-cmd :discover-gatt conn-handle)
+                  ))
+
+               (:encryption-change
+                (let* ((data (cadr (cadr evt)))
+                       (conn-handle (getf data :handle)))
+
+                  ;; TODO: ui element showing we're bonded
+                  (log-inf "[~X] BONDED OK" (handle->address conn-handle connections))
                   ))
 
                (:otherwise
                 (log-inf "EVENT: ~X" evt)))
            t))
+          (:acl t)
+          (otherwise (log-err "UNHANDLED EVENT ~X" evt))
           )))
 
     (log-inf "Exiting UI")
