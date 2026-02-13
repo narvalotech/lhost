@@ -83,11 +83,13 @@
   (when event
     (sb-concurrency:send-message mailbox event)))
 
-(defun make-menuitem (master text q command-id &optional accelerator)
+(defun make-menuitem (master text q command-id &optional accelerator state)
   (apply #'make-instance
          (append
           (list 'ng:menubutton :master master :text text
                                :command (lambda () (queue q command-id)))
+          (when state
+            (list :state state))
           (when accelerator
             ;; Bind the keyboard event
             (ng:bind (ng:root-toplevel) accelerator (lambda (e)
@@ -512,24 +514,24 @@
 
     ;; In-connection menu
     (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<d>")
-    (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<u>")
-    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<m>")
+    (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<u>" :disabled)
+    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<m>" :disabled)
 
     ;; Security
     (make-menuitem connection-menu "Bond" ui-events :bond "<b>")
-    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<e>")
+    (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<e>" :disabled)
     (make-menuitem connection-menu "Stash bonds" ui-events :stash-bonds "<Control-b>")
     (make-menuitem connection-menu "Unstash bonds" ui-events :unstash-bonds "<Control-B>")
 
     ;; GATT client
-    (make-menuitem att-menu "Read" ui-events :att-read "<r>")
-    (make-menuitem att-menu "Write" ui-events :att-write "<w>")
+    (make-menuitem att-menu "Read" ui-events :att-read "<r>" :disabled)
+    (make-menuitem att-menu "Write" ui-events :att-write "<w>" :disabled)
 
     ;; GATT server
-    (make-menuitem gatt-server-menu "Read" ui-events :gatt-server-get "<R>")
-    (make-menuitem gatt-server-menu "Write" ui-events :gatt-server-set "<W>")
-    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<N>")
-    (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone)
+    (make-menuitem gatt-server-menu "Read" ui-events :gatt-server-get "<R>" :disabled)
+    (make-menuitem gatt-server-menu "Write" ui-events :gatt-server-set "<W>" :disabled)
+    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<N>" :disabled)
+    (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone "<Control-C>" :disabled)
 
     ;; Big business
     ;; TODO: move that to explicit user action. e.g. START button.
