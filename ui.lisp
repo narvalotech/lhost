@@ -330,11 +330,11 @@
                  (log-inf "ATT WRITE"))
                 (:quit
                  (progn
-                   (log-inf "Exiting UI backend")
+                   (log-inf "Exiting UI host interface")
                    (return nil)))))
             (do-rx-work hci ui-events)
             ))))
-    :name "UI backend <=> Host")))
+    :name "Host interface")))
 
 (defun stop-backend (backend-thread)
   (ignore-errors
@@ -344,13 +344,12 @@
      (bt:destroy-thread (nth 0 backend-thread))
      (bt:destroy-thread (nth 1 backend-thread))
      (sleep .5)
-     )
+     (log-inf "KILLED ALL THREADS"))
    (loop while (drain-mailbox *evts*))
    (loop while (drain-mailbox *cmds*))
 
    ;; And a brand-new controller
    (setf *controller* (make-controller))
-   (log-inf "KILLED ALL THREADS")
    ))
 
 (defun dispatch-cmd (cmd-id &rest args)

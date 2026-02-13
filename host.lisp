@@ -36,8 +36,9 @@
                                        (list message)
                                        args))))
         (funcall *log-line-sink*
-                 (format nil "[~A] ~A: ~A~%"
+                 (format nil "[~A][~A] ~A: ~A~%"
                          (if *log-time* (local-time:now) "")
+                         (bt:thread-name (bt:current-thread))
                          (nth 1 (getf *log-levels* severity))
                          log-line))))))
 
