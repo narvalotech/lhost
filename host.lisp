@@ -1174,8 +1174,8 @@
                  :peer-address-type (getf address :type)
                  :peer-address (getf address :address)
                  :own-address-type #x01 ; random
-                 :interval-min 100
-                 :interval-max 100
+                 :interval-min 6
+                 :interval-max 10
                  :max-latency 0
                  :supervision-timeout 200
                  :min-connection-event-length 0
