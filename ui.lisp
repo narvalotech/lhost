@@ -393,6 +393,7 @@
 
 (setf *bonds* (make-hash-table))
 (ng:with-nodgui ()
+  (hci-log-reset)
   (ng:wm-title ng:*tk* "Azul '94")
 
   (let* ((ui-events (make-mailbox "ui events"))
@@ -689,5 +690,6 @@
           )))
 
     (log-inf "Exiting UI")
+    (hci-log-write)
     (ng:exit-nodgui)
     ))
