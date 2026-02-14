@@ -111,13 +111,21 @@
             (list
              :accelerator accelerator)))))
 
-(defun sort-scan (devices by)
+(defun sort-scan (by devices)
   (sort devices
         (case by
           (:recent (lambda (a b) (< (getf a :timestamp) (getf b :timestamp))))
           (:rssi (lambda (a b) (> (getf a :rssi) (getf b :rssi))))
           (:name (lambda (a b) (string-lessp (getf a :name) (getf b :name))))
           (otherwise (lambda (a b) (string-lessp (getf a :name) (getf b :name)))))))
+
+(defun filter-scan (name-filter devices)
+  (if (zerop (length name-filter))
+      devices
+      (remove-if-not (lambda (device)
+                       ;; Case-insensitive search
+                       (search name-filter (getf device :name) :test #'equalp))
+                     devices)))
 
 (defun log-to-widget (textview line)
   (ng:configure textview :state :normal)
@@ -435,6 +443,7 @@
          (backend-thread nil)
          (scanned-devices (make-hash-table))
          (sort-scan-by :rssi)
+         (filter-scan-name "")
          (last-scan-display (get-internal-real-time))
          )
 
@@ -528,6 +537,7 @@
     ;; Scan menu
     (make-menuitem scan-menu "Scan" ui-events :start-scan "<s>")
     (make-menuitem scan-menu "Stop scan" ui-events :stop-scan "<S>")
+    (make-menuitem scan-menu "Set scan name filter" ui-events :filter-scan "<f>")
     (make-menuitem scan-menu "Connect" ui-events :connect "<c>")
 
     ;; In-connection menu
@@ -569,6 +579,15 @@
            (dispatch-cmd evt))
           (:stop-scan
            (dispatch-cmd evt))
+          (:filter-scan
+           (progn
+             (setf filter-scan-name
+                   (nodgui.mw:text-input-dialog
+                    content "Scan filter" "Enter name to filter by"
+                    :text filter-scan-name))
+             (log-inf "Set scan filter to: ~A" filter-scan-name)
+             t))
+
           (:connect
            (let ((device (get-selected-device treeview)))
              (when (and device
@@ -645,9 +664,9 @@
            (progn
              (add-devices-to-treeview
               treeview
-              (sort-scan
-               (make-device-list scanned-devices)
-               sort-scan-by))
+              (sort-scan sort-scan-by
+                         (filter-scan filter-scan-name
+                                      (make-device-list scanned-devices))))
              t))
 
           (:gatt-discovery-end
