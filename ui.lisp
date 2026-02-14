@@ -14,39 +14,51 @@
   (let ((report (nth 0 (getf (nth 1 evt) :reports))))
     (list :address-type (getf report :address-type)
           :address (decode-c-int (getf report :address))
-          :timestamp 0                  ; later dude
+          :timestamp (get-internal-real-time)
           :rssi (make-a-sign (getf report :rssi))
           :data (getf report :data))))
 
+(defun merge-plist (a b)
+  (loop for (key val) on a by #'cddr
+        when (getf b key) do
+          (setf (getf a key) (getf b key)))
+  a)
+
+(defun merge-reports (dest decoded)
+  (let ((parsed (parse-ad (getf decoded :data)))
+        (existing (getf (gethash (getf decoded :address) dest) :parsed)))
+    (setf (getf (gethash (getf decoded :address) dest) :parsed)
+          (if existing
+              (merge-plist existing parsed)
+              parsed))))
+
 (defun accumulate-scan-reports (dest report)
-  ;; Track the last 10 reports for each address
+  ;; Track the last 20 reports for each address
   (let ((decoded (decode-scan-report report)))
-    (push decoded (gethash (getf decoded :address) dest))
-    (nbutlast (gethash (getf decoded :address) dest) 10)
+    (push decoded (getf (gethash (getf decoded :address) dest) :reports))
+    (nbutlast (getf (gethash (getf decoded :address) dest) :reports) 20)
+
+    ;; Parse and merge reports
+    (merge-reports dest decoded)
     nil))
 
-(defun extract-name (ad)
-  (ignore-errors                        ; boooo
-   (from-c-string
-    (getf (parse-ad ad) :name-complete))))
+(defun extract-name (parsed)
+  (let* ((encoded-name (or (getf parsed :name-complete)
+                           (getf parsed :name-short))))
+    (ignore-errors
+     (if encoded-name
+         (from-c-string encoded-name)
+         ""))))
 
 (defun make-device-list (devices-dict)
   (let ((devices))
-    (maphash (lambda (address reports)
+    (maphash (lambda (address data)
                (declare (ignore address))
-               (let* ((report (nth 0 reports))
-                      (name (extract-name (getf report :data))))
+               (let* ((report (car (getf data :reports)))
+                      (name (extract-name (getf data :parsed))))
                  (push (append report (list :name name)) devices)))
              devices-dict)
     devices))
-
-(defun parse-name (ad)
-  (let* ((parsed (parse-ad ad))
-         (encoded-name (or (getf parsed :name-complete)
-                           (getf parsed :name-short))))
-    (if encoded-name
-        (from-c-string encoded-name)
-        "")))
 
 (defun print-addr (address)
   (format nil "~{~2,'0X~^:~}"
@@ -561,7 +573,7 @@
            (let ((device (get-selected-device treeview)))
              (when (and device
                         (not (gethash (getf device :address) connections)))
-               (let* ((reports (gethash (getf device :address) scanned-devices))
+               (let* ((reports (getf (gethash (getf device :address) scanned-devices) :reports))
                       (address-with-type (extract-addr-from-report (nth 0 reports))))
                  (when address-with-type
                    (dispatch-cmd :connect address-with-type))))
