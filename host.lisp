@@ -3112,6 +3112,7 @@
 
   (bt:make-thread
    (lambda ()
+     ;; (with-packetizer packetizer *h2c-path* *c2h-path*
      (with-serial-packetizer packetizer "/dev/ttyACM0"
        (setf (getf packetizer :rx-mailbox) c2h-mailbox)
        (setf (getf packetizer :tx-mailbox) h2c-mailbox)
