@@ -19,9 +19,8 @@
           :data (getf report :data))))
 
 (defun merge-plist (a b)
-  (loop for (key val) on a by #'cddr
-        when (getf b key) do
-          (setf (getf a key) (getf b key)))
+  (loop for (key val) on b by #'cddr
+        do (setf (getf a key) val))
   a)
 
 (defun merge-reports (dest decoded)

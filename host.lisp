@@ -1356,9 +1356,11 @@
     (loop while encoded
           nconc
           (progn
-            (setf len (- (pull-int encoded :u8) 1))
-            (setf type (pull-int encoded :u8))
-            (when (>= len 0)
+            (setf len (pull-int encoded :u8))
+            (when (and (> len 0) (>= (length encoded) len))
+              (log-inf "decoding len ~A enc ~A" len encoded)
+              (setf type (pull-int encoded :u8))
+              (decf len)
               (list
                (plist-key +ad-types+ type)
                (pull encoded len)))))))
