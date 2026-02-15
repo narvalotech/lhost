@@ -218,10 +218,6 @@
   ;; TODO: make this human-readable for svc, decl, desc
   (px (getf attribute :data)))
 
-(defun format-uuid (uuid)
-  ;; TODO: pretty-print 128-bit uuid
-  (format nil "~X" uuid))
-
 (defun add-gatt-table-to-treeview (treeview gatt-table)
   ;; Format of gatt-table is whatever lhost spits out
   (loop for attribute in gatt-table do
@@ -232,7 +228,7 @@
                   :column-values
                   (list
                    (abbrev-attribute-type (getf attribute :type))
-                   (format-uuid (getf attribute :uuid))
+                   (pretty-print-uuid (getf attribute :uuid))
                    (format-attribute-data attribute)))))
 
 (defun add-gatt-table-to-conn (address gatt-table connections)
@@ -726,6 +722,7 @@
           (otherwise (log-err "UNHANDLED EVENT ~X" evt))
           )))
 
+    (setf *test* scanned-devices)
     (log-inf "Exiting UI")
     (hci-log-write)
     (ng:exit-nodgui)

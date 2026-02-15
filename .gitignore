@@ -3,3 +3,4 @@ build/
 *.pcap
 *.log
 .direnv/
+*.fasl

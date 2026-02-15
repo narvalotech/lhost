@@ -1303,6 +1303,27 @@
       (make-c-int :u16 (parse-integer uuidstr :radix 16))
       (reverse (parse-uuid-128 uuidstr))))
 
+(defun eq-any (a &rest values)
+  (loop for b in values do
+        (when (= a b) (return t))))
+
+(defun pretty-print-uuid (long-uuid)
+  (let ((output ""))
+    (loop for char across (format nil "~X" long-uuid) do
+      (progn
+        (setf output
+              (concatenate 'string output (format nil "~A" char))))
+      (when (eq-any (length output) 8 13 18 23)
+        (setf output
+              (concatenate 'string output "-"))))
+    output))
+
+(pretty-print-uuid #x6E400001B5A3F393E0A9E50E24DCCA9E)
+ ; => "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+
+(pretty-print-uuid #x6E40)
+ ; => "6E40"
+
 (defconstant +nus-uuid+ "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 (defconstant +battery-uuid+ "180F")
 (px (parse-uuid +nus-uuid+))
