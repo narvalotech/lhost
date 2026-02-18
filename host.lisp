@@ -3012,7 +3012,8 @@
                    :ltk ltk))))
 
 (defconstant +l2cap-le-signalling-chan+ #x0005)
-(defconstant +l2cap-conn-param-update-req+ #x13)
+(defconstant +l2cap-conn-param-update-req+ #x12)
+(defconstant +l2cap-conn-param-update-rsp+ #x13)
 
 (defun handle-signalling-mitm (hci conn data)
   (if (not (getf *mitm* :ready))
@@ -3032,10 +3033,10 @@
              (identifier (pull-int payload :u8)))
         (log-inf (format nil "SIGNALLING PACKET: conn ~A op ~X payload ~X" opcode conn payload))
         (l2cap-send hci conn +l2cap-le-signalling-chan+
-                    (ecase opcode
-                      (+l2cap-conn-param-update-req+
+                    (cond
+                      ((= opcode +l2cap-conn-param-update-req+)
                        (append
-                        (make-c-int :u8 +l2cap-conn-param-update-req+)
+                        (make-c-int :u8 +l2cap-conn-param-update-rsp+)
                         (make-c-int :u8 identifier)
                         (make-c-int :u16 #x2)
                         (make-c-int :u16 #x0001)))))))) ; rejecc
