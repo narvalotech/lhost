@@ -1358,7 +1358,7 @@
           (progn
             (setf len (pull-int encoded :u8))
             (when (and (> len 0) (>= (length encoded) len))
-              (log-inf "decoding len ~A enc ~A" len encoded)
+              (log-trace "decoding len ~A enc ~A" len encoded)
               (setf type (pull-int encoded :u8))
               (decf len)
               (list
