@@ -2403,6 +2403,13 @@
   ;; Don't reply to notifications
   nil)
 
+(defun gatts-process-mtu-req (conn req)
+  (declare (ignore conn))
+  (let ((mtu (pull-int req :u16)))
+    (log-dbg "MTU req: ~A" mtu)
+    (att-make-packet :exchange-mtu-rsp
+                     (make-c-int :u16 mtu))))
+
 (defparameter *mitm* nil)
 (defun start-mitm (central-conn peripheral-conn)
   (setf *mitm*
@@ -2453,6 +2460,8 @@
         (att-send
          hci conn
          (case op-name
+           (:exchange-mtu-req
+            (gatts-process-mtu-req conn req))
            (:find-by-type-value-req
             (gatts-process-find-by-type-value conn req))
            (:read-by-type-req
