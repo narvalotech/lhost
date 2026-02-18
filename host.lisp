@@ -2636,8 +2636,8 @@
          (oob-flag #x00)                ; no OOB
          (authreq #x09)                 ; LESC, bonding
          (max-key-size 16)
-         (ini-key-dist #x00)            ; no LTK dist on LESC
-         (rsp-key-dist #x00))
+         (ini-key-dist #x01)            ; "distribute" LTK
+         (rsp-key-dist #x01))
 
     ;; [v5.4 p1557] ok so here's the gotcha: iocap in the PDU description IS NOT
     ;; the same IOcap as used in the f6 function. There it means
