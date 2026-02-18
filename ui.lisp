@@ -343,6 +343,12 @@
                  (log-inf "ATT READ"))
                 (:att-write
                  (log-inf "ATT WRITE"))
+                (:att-notify
+                 (let* ((conn-handle (nth 1 cmd))
+                        (handle (nth 2 cmd))
+                        (data (nth 3 cmd)))
+                   (log-inf "ATT NOTIFY C ~X H ~X D ~X" conn-handle handle data)
+                   (notify hci conn-handle handle data)))
                 (:quit
                  (progn
                    (log-inf "Exiting UI host interface")
@@ -372,14 +378,14 @@
   (queue *cmds* (push cmd-id args))
   t)
 
-(defun fromhexstream (str)
+(defun fromhexstream (str &optional (bytes 1))
   (ignore-errors
    (with-input-from-string (is str)
      (loop for i from 0 below (length str) by 3
            collect
            (let ((parsed
                    (parse-integer (subseq str i (min (+ i 2) (length str))) :radix 16)))
-             (when (< parsed #x100)
+             (when (< parsed (ash 1 (* 8 bytes)))
                parsed))))))
 
 (defun cccd? (conn handle)
@@ -433,7 +439,9 @@
          (gatt-server-menu (make-instance 'ng:menu :master menubar :text "GATT server"))
 
          (connections (make-hash-table))
+         (previous-gatt-notify-handle "0001")
          (previous-gatt-write "")
+         (previous-gatt-notify "")
          (default-cccd-write "01 00")
          (backend-thread nil)
          (scanned-devices (make-hash-table))
@@ -564,6 +572,10 @@
     (setf backend-thread (start-backend ui-events))
     (dispatch-cmd :init)
 
+    ;; Print out GATT table
+    ;; TODO: make a proper pane for this
+    (log-inf "GATT TABLE: ~A" (gattc-print *gatts-table*))
+
     ;; Poll for events
     (loop while
       (let ((evt (sb-concurrency:receive-message ui-events)))
@@ -645,6 +657,27 @@
                  (when parsed-data
                    (unless cccd (setf previous-gatt-write data))
                    (dispatch-cmd :att-write (getf conn :address) handle data))))
+             t))
+          (:att-notify
+           ;; TODO: log writes/reads to UI window too
+           (let* ((tab-name (get-tab-text activity-frame))
+                  (conn-handle (getf (gethash (decode-mac tab-name) connections) :handle)))
+             (when conn-handle
+               (let* ((handle
+                        (nodgui.mw:text-input-dialog
+                         content "Handle" "GATT Notify handle (hex)"
+                         :text previous-gatt-notify-handle))
+                      (parsed-handle (decode-c-int (fromhexstream handle 2) :u16))
+                      (data
+                        (nodgui.mw:text-input-dialog
+                         content "GATT Notify Data" "GATT Notify Data (e,g, 01 ef 32 c1)"
+                         :text previous-gatt-notify))
+                      (parsed-data (fromhexstream data)))
+                 (when (and parsed-handle parsed-data)
+                   (log-inf "[~A] att-notify ~4,'0,X" tab-name handle)
+                   (setf previous-gatt-notify data)
+                   (setf previous-gatt-notify-handle handle)
+                   (dispatch-cmd :att-notify conn-handle parsed-handle parsed-data))))
              t))
 
           (:start-adv t)
