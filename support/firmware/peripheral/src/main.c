@@ -108,7 +108,6 @@ static uint8_t discover_func(struct bt_conn *conn,
 }
 
 static void start_discovery(void) {
-	return; 					/* TODO: remove */
 	printk("########################################\n");
 	printk("START DISCOVERY\n");
 	memcpy(&discover_uuid, BT_UUID_HRS, sizeof(discover_uuid));

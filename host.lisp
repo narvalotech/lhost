@@ -1305,7 +1305,7 @@
 
 (defun eq-any (a &rest values)
   (loop for b in values do
-        (when (= a b) (return t))))
+        (when (eql a b) (return t))))
 
 (defun pretty-print-uuid (long-uuid)
   (let ((output ""))
@@ -3061,6 +3061,22 @@
      (handle-signalling hci (getf packet :conn-handle) packet))
     (t (error "Unknown l2cap channel"))
     ))
+
+(defun decode-att-data (op data)
+  (if (eq-any op :write-req :write-cmd :read-req :handle-value-ntf)
+   (list :handle (pull-int data :u16)
+         :data data)
+   (list :data data)))
+
+(defun decode-att (packet)
+  (when (eql +l2cap-att-chan+ (getf packet :channel))
+    (let* ((op (plist-key +att-opcodes+ (pull-int (getf packet :data) :u8)))
+           (conn (getf packet :conn-handle))
+           (data (getf packet :data))
+           (decoded (decode-att-data op data)))
+      (append
+       (list :conn conn :op op)
+       decoded))))
 
 (defun process-remote-conn-param (hci packet)
   (log-dbg (format nil "NAK remote conn param ~X" packet))

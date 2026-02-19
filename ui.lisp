@@ -255,7 +255,7 @@
     (let ((packet (receive-rxq hci)))
       (queue ui-events packet)
       (if packet
-          (process-hci hci packet)
+          (process-hci hci (copy-tree packet))
           (return-from do-rx-work nil)))))
 
 (defun encode-address (address)
@@ -750,7 +750,16 @@
                (:otherwise
                 (log-inf "EVENT: ~X" evt)))
            t))
-          (:acl t)
+
+          (:acl
+           (let ((att-packet (decode-att (cadr evt))))
+             (when att-packet
+               (log-inf "ATT RX: ~X" att-packet)
+               ;; TODO: highlight CCCD writes
+               ;; TODO: print LTK to UI window too
+               )
+             t))
+
           (otherwise (log-err "UNHANDLED EVENT ~X" evt))
           )))
 
