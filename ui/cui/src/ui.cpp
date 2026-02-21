@@ -1,7 +1,17 @@
 #include "imgui.h"
 
+enum class UiEvent {
+	StartScan,
+	StopScan
+};
+
+static void queue_event(UiEvent event) {
+
+}
+
 void render_cui(ImGuiIO& io)
 {
+	/* TODO: start advertising button */
 	static float f = 0.0f;
 	static int counter = 0;
 
@@ -11,6 +21,16 @@ void render_cui(ImGuiIO& io)
 
 	if (ImGui::Button("Button")) {
 		counter++;
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Start Scan")) {
+		queue_event(UiEvent::StartScan);
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Stop Scan")) {
+		queue_event(UiEvent::StopScan);
 	}
 
 	ImGui::SameLine();
