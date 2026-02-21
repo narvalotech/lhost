@@ -19,6 +19,7 @@ find_package(SDL2 REQUIRED)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
+    src/ui.cpp
 
     # Imgui sources
     ${imgui_SOURCE_DIR}/imgui.cpp
