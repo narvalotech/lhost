@@ -1,45 +1,20 @@
-// Dear ImGui: standalone example application for SDL2 + SDL_Renderer
-// (SDL is a cross-platform general purpose library for handling windows, inputs, OpenGL/Vulkan/Metal graphics context creation, etc.)
-
-// Learn about Dear ImGui:
-// - FAQ                  https://dearimgui.com/faq
-// - Getting Started      https://dearimgui.com/getting-started
-// - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
-// - Introduction, links and more at the top of imgui.cpp
-
-// Important to understand: SDL_Renderer is an _optional_ component of SDL2.
-// For a multi-platform app consider using e.g. SDL+DirectX on Windows and SDL+OpenGL on Linux/OSX.
-
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
 #include <stdio.h>
 #include <SDL.h>
-#ifdef _WIN32
-#include <windows.h>        // SetProcessDPIAware()
-#endif
-
-#if !SDL_VERSION_ATLEAST(2,0,17)
-#error This backend requires SDL 2.0.17+ because of SDL_RenderGeometry() function
-#endif
 
 // Main code
 int main(int, char**)
 {
     // Setup SDL
-#ifdef _WIN32
-    ::SetProcessDPIAware();
-#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
     {
         printf("Error: %s\n", SDL_GetError());
         return 1;
     }
 
-    // From 2.0.18: Enable native IME.
-#ifdef SDL_HINT_IME_SHOW_UI
     SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
-#endif
 
     // Create window with SDL_Renderer graphics context
     float main_scale = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
@@ -56,9 +31,6 @@ int main(int, char**)
         SDL_Log("Error creating SDL_Renderer!");
         return 1;
     }
-    //SDL_RendererInfo info;
-    //SDL_GetRendererInfo(renderer, &info);
-    //SDL_Log("Current SDL_Renderer: %s", info.name);
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -79,24 +51,6 @@ int main(int, char**)
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer2_Init(renderer);
-
-    // Load Fonts
-    // - If fonts are not explicitly loaded, Dear ImGui will select an embedded font: either AddFontDefaultVector() or AddFontDefaultBitmap().
-    //   This selection is based on (style.FontSizeBase * style.FontScaleMain * style.FontScaleDpi) reaching a small threshold.
-    // - You can load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-    // - If a file cannot be loaded, AddFont functions will return a nullptr. Please handle those errors in your code (e.g. use an assertion, display an error and quit).
-    // - Read 'docs/FONTS.md' for more instructions and details.
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use FreeType for higher quality font rendering.
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    //style.FontSizeBase = 20.0f;
-    //io.Fonts->AddFontDefaultVector();
-    //io.Fonts->AddFontDefaultBitmap();
-    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
-    //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
-    //IM_ASSERT(font != nullptr);
 
     // Our state
     bool show_demo_window = true;
