@@ -3,43 +3,40 @@ use iced::keyboard;
 use iced::keyboard::key;
 use iced::keyboard::key::Key::Named;
 
-use iced::{Center, Subscription};
-use iced::widget::{Row, button, row, column};
 use iced;
+use iced::widget::{Row, button, column, container, row};
+use iced::{Center, Element, Fill, Left, Subscription};
 
 // --------------------------
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use tokio::net::TcpStream;
 use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 struct State {
-    tx: mpsc::Sender<KeyEvent>,
+    tx: mpsc::Sender<UICommand>,
     _rt: tokio::runtime::Runtime,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq)]
-enum KeyEvent {
+enum UICommand {
     Unknown,
-    KeyDown,
-    KeyUp,
-    KeyLeft,
-    KeyRight,
-    KeySelect,
-    KeyBack,
-    KeyPower,
+    StartScan,
+    StopScan,
+    Connect,
+    Disconnect,
 }
 
 #[derive(Clone, Debug)]
 enum UIEvent {
-    Key(KeyEvent),
-    Raw(Event)
+    Command(UICommand),
+    Iced(Event),
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub struct InputEvent {
-    key: KeyEvent,
+pub struct HostEvent {
+    command: UICommand,
 }
 
 use tokio::runtime::Builder;
@@ -63,58 +60,55 @@ impl State {
     }
 
     fn subscription(&self) -> Subscription<UIEvent> {
-        event::listen().map(UIEvent::Raw)
+        event::listen().map(UIEvent::Iced)
     }
 
     fn update(&mut self, message: UIEvent) {
         let data = match message {
-            UIEvent::Key(code) => code,
-            UIEvent::Raw(event) => match event {
-                Event::Keyboard(keyboard::Event::KeyPressed{key: Named(code), ..}) => {
+            UIEvent::Command(code) => code,
+            UIEvent::Iced(event) => match event {
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: Named(code), ..
+                }) => {
                     let converted = match code {
-                        key::Named::ArrowDown => KeyEvent::KeyDown,
-                        key::Named::ArrowUp => KeyEvent::KeyUp,
-                        key::Named::ArrowLeft => KeyEvent::KeyLeft,
-                        key::Named::ArrowRight => KeyEvent::KeyRight,
-                        key::Named::Enter => KeyEvent::KeySelect,
-                        key::Named::Backspace => KeyEvent::KeyBack,
-                        key::Named::Escape => KeyEvent::KeyPower,
-                        _ => {
-                            KeyEvent::Unknown
-                        }
+                        // key::Named::ArrowDown => UICommand::KeyDown,
+                        // key::Named::ArrowUp => UICommand::KeyUp,
+                        // key::Named::ArrowLeft => UICommand::KeyLeft,
+                        // key::Named::ArrowRight => UICommand::KeyRight,
+                        // key::Named::Enter => UICommand::KeySelect,
+                        // key::Named::Backspace => UICommand::KeyBack,
+                        // key::Named::Escape => UICommand::KeyPower,
+                        _ => UICommand::Unknown,
                     };
                     // println!("key: {:?}", event);
                     // self.update(UIEvent::Key(converted))
                     converted
                 }
-                _ => {KeyEvent::Unknown},
+                _ => UICommand::Unknown,
             },
         };
-        if data != KeyEvent::Unknown {
+        if data != UICommand::Unknown {
             println!("send: {:?}", data);
             self.tx.blocking_send(data).unwrap();
         }
     }
 
-    fn view(&self) -> Row<'_, UIEvent> {
-        row![
-            // D-pad
-            button("<").on_press(UIEvent::Key(KeyEvent::KeyLeft)),
+    fn view(&self) -> Element<'_, UIEvent> {
+        container(
             column![
-                button("/\\").on_press(UIEvent::Key(KeyEvent::KeyUp)),
-                button("\\/").on_press(UIEvent::Key(KeyEvent::KeyDown)),
-            ].spacing(10).align_x(Center),
-            button(">").on_press(UIEvent::Key(KeyEvent::KeyRight)),
-
-            // Enter/Back
-            column![
-                button("SELECT").on_press(UIEvent::Key(KeyEvent::KeySelect)),
-                button(" BACK").on_press(UIEvent::Key(KeyEvent::KeyBack)),
-            ].spacing(10).align_x(Center),
-        ]
-        .spacing(10)
-        .padding(20)
-        .align_y(Center)
+                button("Start scan").on_press(UIEvent::Command(UICommand::StartScan)),
+                button("Stop scan").on_press(UIEvent::Command(UICommand::StopScan)),
+                button("Connect").on_press(UIEvent::Command(UICommand::Connect)),
+                button("Disconnect").on_press(UIEvent::Command(UICommand::Disconnect)),
+            ]
+            .spacing(10)
+            .padding(20)
+            .align_x(Left),
+        )
+        .padding(10)
+        // .center_x(Fill)
+        // .center_y(Fill)
+        .into()
     }
 }
 
@@ -124,24 +118,23 @@ impl Default for State {
     }
 }
 
-async fn write_event_to_stream(stream: &mut TcpStream, event: InputEvent) {
+async fn write_event_to_stream(stream: &mut TcpStream, event: HostEvent) {
     // let output: Vec<u8> = to_allocvec_cobs(&event).unwrap();
 
     // stream.write_all(&output).await.unwrap();
 
-    println!("written");
-    // let decoded: InputEvent = from_bytes_cobs(&mut output.clone()).unwrap();
+    println!("written {:?}", event);
+
+    // let decoded: HostEvent = from_bytes_cobs(&mut output.clone()).unwrap();
     // println!("Written: {:?}", decoded);
 }
 
-async fn tcp_client(mut rx: mpsc::Receiver<KeyEvent>) {
+async fn tcp_client(mut rx: mpsc::Receiver<UICommand>) {
     let mut stream = TcpStream::connect("127.0.0.1:9999").await.unwrap();
 
     loop {
         if let Some(keycode) = rx.recv().await {
-            let e = InputEvent {
-                key: keycode
-            };
+            let e = HostEvent { command: keycode };
             write_event_to_stream(&mut stream, e).await;
         }
     }
@@ -149,7 +142,7 @@ async fn tcp_client(mut rx: mpsc::Receiver<KeyEvent>) {
 
 pub fn main() -> iced::Result {
     let settings = iced::window::Settings {
-        size: iced::Size{width: 240.0, height: 120.0},
+        // size: iced::Size{width: 240.0, height: 120.0},
         resizable: false,
         ..Default::default()
     };
