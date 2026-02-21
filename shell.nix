@@ -45,9 +45,8 @@ pkgs.mkShell {
     sbcl-wrapped
     pkg-config
     gcc
+    libGL
+    cmake
+    ninja
   ] ++ libraryPaths;
-
-  shellHook = ''
-    echo "Wrapped SBCL ready with libturbojpeg baked in!"
-  '';
 }
