@@ -10,7 +10,6 @@ use iced::{Center, Element, Fill, Left, Subscription};
 // --------------------------
 use serde::{Deserialize, Serialize};
 
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
@@ -40,6 +39,13 @@ pub struct HostEvent {
 }
 
 use tokio::runtime::Builder;
+
+// gemini
+fn make_button<'a>( (label, msg): (&'a str, UICommand) ) -> iced::widget::Button<'a, UIEvent> {
+    button(label)
+    .width(iced::Length::Fill)
+    .on_press(UIEvent::Command(msg))
+}
 
 impl State {
     pub fn new() -> Self {
@@ -96,18 +102,18 @@ impl State {
     fn view(&self) -> Element<'_, UIEvent> {
         container(
             column![
-                button("Start scan").on_press(UIEvent::Command(UICommand::StartScan)),
-                button("Stop scan").on_press(UIEvent::Command(UICommand::StopScan)),
-                button("Connect").on_press(UIEvent::Command(UICommand::Connect)),
-                button("Disconnect").on_press(UIEvent::Command(UICommand::Disconnect)),
+                make_button(("Start scan", UICommand::StartScan)),
+                make_button(("Stop scan", UICommand::StopScan)),
+                make_button(("Connect", UICommand::Connect)),
+                make_button(("Disconnect", UICommand::Disconnect)),
             ]
+            .width(iced::Length::Fill)
             .spacing(10)
             .padding(20)
             .align_x(Left),
         )
         .padding(10)
-        // .center_x(Fill)
-        // .center_y(Fill)
+        .max_width(300.0)
         .into()
     }
 }
@@ -118,7 +124,7 @@ impl Default for State {
     }
 }
 
-async fn write_event_to_stream(stream: &mut TcpStream, event: HostEvent) {
+async fn write_event_to_stream(_stream: &mut TcpStream, event: HostEvent) {
     // let output: Vec<u8> = to_allocvec_cobs(&event).unwrap();
 
     // stream.write_all(&output).await.unwrap();
