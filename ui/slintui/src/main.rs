@@ -1,68 +1,115 @@
 use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "method", content = "params")]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteMethod {
+    Echo { message: String },
+    Add { a: i32, b: i32 },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: String,
+    pub id: u64,
+    #[serde(flatten)]
+    pub method: RemoteMethod,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct JsonRpcResponse<T> {
+    pub result: Option<T>,
+    pub error: Option<Value>,
+    pub id: u64,
+}
+
+struct LispClient {
+    reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
+    writer: tokio::net::tcp::OwnedWriteHalf,
+    next_id: u64,
+}
+
+impl LispClient {
+    async fn new(addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let stream = TcpStream::connect(addr).await?;
+        let (read_half, write_half) = stream.into_split();
+        Ok(Self {
+            reader: BufReader::new(read_half),
+            writer: write_half,
+            next_id: 1,
+        })
+    }
+
+    async fn call<T: for<'de> Deserialize<'de>>(
+        &mut self,
+        method: RemoteMethod
+    ) -> Result<T, Box<dyn std::error::Error>> {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        // 1. Prepare JSON Body
+        let json_body = serde_json::to_string(&JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id,
+            method,
+        })?;
+
+        // 2. Wrap in HTTP for the Common Lisp 'jsonrpc' lib
+        let http_request = format!(
+            "POST / HTTP/1.1\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             Connection: keep-alive\r\n\
+             \r\n\
+             {}",
+            json_body.len(),
+            json_body
+        );
+
+        self.writer.write_all(http_request.as_bytes()).await?;
+        self.writer.flush().await?;
+
+        // 3. Parse Response Headers for Content-Length
+        let mut content_length = 0;
+        loop {
+            let mut line = String::new();
+            self.reader.read_line(&mut line).await?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() { break; } // End of headers
+
+            if trimmed.to_lowercase().starts_with("content-length:") {
+                if let Some(val) = trimmed.split(':').nth(1) {
+                    content_length = val.trim().parse::<usize>()?;
+                }
+            }
+        }
+
+        // 4. Read exact bytes for body (No newline required)
+        let mut buffer = vec![0u8; content_length];
+        self.reader.read_exact(&mut buffer).await?;
+
+        let response: JsonRpcResponse<T> = serde_json::from_slice(&buffer)?;
+
+        if let Some(error) = response.error {
+            return Err(format!("Lisp Error: {:?}", error).into());
+        }
+
+        response.result.ok_or_else(|| "Missing result".into())
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Connect to the Lisp server
-    let stream = TcpStream::connect("127.0.0.1:55000").await?;
-    let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
+    let mut client = LispClient::new("127.0.0.1:55000").await?;
 
-    // 2. Construct the JSON-RPC Request
-    let request = json!({
-        "jsonrpc": "2.0",
-        "method": "echo",
-        "params": { "message": "Hello from Rust!" },
-        "id": 1
-    });
-
-    let payload = request.to_string();
-
-    // 3. Format with Content-Length header (The "LSP" format Lisp expects)
-    // Note: \r\n is standard for these headers.
-    let message = format!("Content-Length: {}\r\n\r\n{}", payload.len(), payload);
-
-    writer.write_all(message.as_bytes()).await?;
-    writer.flush().await?;
-    println!("Sent: {}", payload);
-
-    // 4. Read the response headers
-    let mut content_length = 0;
-    let mut line = String::new();
-
-    // Read headers until we hit the empty line (\r\n\r\n)
-    loop {
-        line.clear();
-        reader.read_line(&mut line).await?;
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        if line.to_lowercase().starts_with("content-length:") {
-            content_length = line
-                .split(':')
-                .nth(1)
-                .unwrap_or("0")
-                .trim()
-                .parse::<usize>()?;
-        }
-    }
-
-    // 5. Read exactly the amount of bytes specified in Content-Length
-    if content_length > 0 {
-        let mut buffer = vec![0u8; content_length];
-        reader.read_exact(&mut buffer).await?;
-
-        let response: Value = serde_json::from_slice(&buffer)?;
-
-        // Handle Lisp's "echo" response
-        // Note: Your Lisp code uses (gethash "message" args),
-        // but the 'echo' method usually returns the input or a result field.
-        println!("Full Response: {:?}", response);
-        if let Some(res) = response.get("result") {
-            println!("Result: {:?}", res);
-        }
-    }
+    // Calling 'echo'
+    let msg: String = client.call(RemoteMethod::Echo {
+        message: "Refactored!".into()
+    }).await?;
+    println!("Lisp said: {}", msg);
 
     Ok(())
 }

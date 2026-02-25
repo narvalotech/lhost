@@ -5,10 +5,13 @@
 ;; Define a simple method
 (jsonrpc:expose *server* "echo"
                 (lambda (args)
-                  (format t "Lisp received: ~A~%" (gethash "message" args))))
+                  (format t "Lisp received: ~A~%" (gethash "message" args))
+                  (format nil "Lisp received: ~A~%" (gethash "message" args))
+                  ))
 ;; (jsonrpc:expose *server* "sum" (lambda (args) (reduce #'+ args)))
 
 ;; Start the server on a specific port
+;; TODO: move to raw sockets
 (jsonrpc:server-listen *server* :port 55000 :mode :tcp)
 
 ;; ;; client
