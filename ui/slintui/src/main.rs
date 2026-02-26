@@ -4,11 +4,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct Address {
+    address_type: u8,
+    address: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ATTPacket {
+    repr: String,
+    op: u8,
+    handle: u16,
+    data: Vec<u8>,
+}
+
+// TODO: gatt table
+// TODO: scan-report
+// TODO: conn-complete
+// TODO: encryption-change
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "method", content = "params")]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteMethod {
     Echo { message: String },
     GetUser { id: u64 },
+    Connect { address: Address },
 }
 
 // Use this for complex data coming from Lisp
@@ -121,8 +141,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Lisp said: {}", msg);
 
     // Calling 'echo'
-    let rsp: UserProfile = client.call(RemoteMethod::GetUser {
-        id: 1337
+    let rsp: String = client.call(RemoteMethod::Connect {
+        address : Address {
+            address_type: 1,
+            address: 0xC1234567890A,
+        }
     }).await?;
     println!("Lisp said: {:?}", rsp);
 
