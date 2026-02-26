@@ -8,7 +8,15 @@ use serde_json::Value;
 #[serde(rename_all = "snake_case")]
 pub enum RemoteMethod {
     Echo { message: String },
-    Add { a: i32, b: i32 },
+    GetUser { id: u64 },
+}
+
+// Use this for complex data coming from Lisp
+#[derive(Deserialize, Debug)]
+pub struct UserProfile {
+    pub id: u64,
+    pub name: String,
+    pub roles: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,7 +54,8 @@ impl LispClient {
     async fn call<T: for<'de> Deserialize<'de>>(
         &mut self,
         method: RemoteMethod
-    ) -> Result<T, Box<dyn std::error::Error>> {
+    ) -> Result<T, Box<dyn std::error::Error>>
+    where T: for<'de> Deserialize<'de>{
         let id = self.next_id;
         self.next_id += 1;
 
@@ -110,6 +119,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         message: "Refactored!".into()
     }).await?;
     println!("Lisp said: {}", msg);
+
+    // Calling 'echo'
+    let rsp: UserProfile = client.call(RemoteMethod::GetUser {
+        id: 1337
+    }).await?;
+    println!("Lisp said: {:?}", rsp);
 
     Ok(())
 }

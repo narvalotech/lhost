@@ -1,4 +1,5 @@
-(ql:quickload '(:jsonrpc :usocket))
+(ql:quickload '(:jsonrpc :usocket :yason))
+(setf yason:*list-encoder* 'yason:encode-alist)
 
 (defvar *server* (jsonrpc:make-server))
 
@@ -8,15 +9,13 @@
                   (format t "Lisp received: ~A~%" (gethash "message" args))
                   (format nil "Lisp received: ~A~%" (gethash "message" args))
                   ))
-;; (jsonrpc:expose *server* "sum" (lambda (args) (reduce #'+ args)))
 
-;; Start the server on a specific port
+;; Example: Returning a complex 'UserProfile' struct to Rust
+(jsonrpc:expose *server* "get_user"
+                (lambda (args)
+                  (list (cons "id" (gethash "id" args))
+                        (cons "name" "Jon")
+                        (cons "roles" #("admin" "developer")))))
+
 ;; TODO: move to raw sockets
 (jsonrpc:server-listen *server* :port 55000 :mode :tcp)
-
-;; ;; client
-;; (defvar *client* (jsonrpc:make-client))
-;; (jsonrpc:client-connect *client* :url "http://127.0.0.1:55000" :mode :tcp)
-;; (jsonrpc:call *client* "echo" "o hai")
-
-;; (jsonrpc:call *client* "sum" '(10 20) :timeout 1.0)
