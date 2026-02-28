@@ -1,0 +1,91 @@
+import {
+    Button,
+    StandardTableView,
+    TextEdit,
+    TabWidget,
+} from "std-widgets.slint";
+
+component ScanResults inherits Rectangle {
+    // StandardTableView rows are a model of models (a list of rows, where each row is a list of items)
+    in property <[[StandardListViewItem]]> device_rows: [];
+
+    min-width: 500px;
+    min-height: 200px;
+    VerticalLayout {
+        StandardTableView {
+            columns: [
+                { title: "Address", min-width: 50px },
+                { title: "RSSI" },
+                { title: "Name" },
+                { title: "Data" },
+            ];
+            rows: root.device_rows;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    // Define the callback here so Rust can "see" it
+    callback start_scan();
+
+    in property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
+
+    VerticalLayout {
+        HorizontalLayout {
+            VerticalLayout {
+                alignment: start;
+                padding: 10px;
+                spacing: 10px;
+                max-width: 100px;
+                Button {
+                    text: "Start scan";
+                    // Link the UI click to the callback
+                    clicked => {
+                        root.start_scan();
+                    }
+                }
+
+                Button {
+                    text: "Stop scan";
+                }
+
+                Button {
+                    text: "Connect";
+                }
+
+                Button {
+                    text: "Bond";
+                }
+
+                Button {
+                    text: "Disconnect";
+                }
+            }
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 10px;
+                TabWidget {
+                    Tab {
+                        title: "Scan results";
+                        results := ScanResults { }
+                    }
+
+                    Tab {
+                        title: "Device A";
+                        Rectangle {
+                            min-height: 200px;
+                            background: orange;
+                        }
+                    }
+                }
+
+                TextEdit {
+                    min-height: 100px;
+                    font-size: 12px;
+                    text: "this is a log line\n and another";
+                }
+            }
+        }
+    }
+}

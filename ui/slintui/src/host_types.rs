@@ -31,7 +31,7 @@ pub struct GattTable {
     attributes: Vec<Attribute>,
 }
 
-#[derive(Serialize, Deserialize, Constructor, Debug)]
+#[derive(Serialize, Deserialize, Constructor, Clone, Debug)]
 pub struct Address {
     address_type: u8,
     address: u64,
