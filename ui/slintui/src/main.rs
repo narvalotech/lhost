@@ -4,12 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Address {
-    address_type: u8,
-    address: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct ATTPacket {
     repr: String,
     op: u8,
@@ -17,10 +11,58 @@ pub struct ATTPacket {
     data: Vec<u8>,
 }
 
-// TODO: gatt table
-// TODO: scan-report
-// TODO: conn-complete
-// TODO: encryption-change
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AttOperation {
+    conn_handle: u16,
+    op: u8,
+    data: Vec<u8>,
+}
+
+// TODO can json support rust enums?
+#[derive(Deserialize, Debug)]
+pub struct Attribute {
+    handle: u16,
+    att_type: u8,
+    uuid16: u16,
+    uuid128: u128,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GattTable {
+    attributes: Vec<Attribute>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Address {
+    address_type: u8,
+    address: u64,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ScanResult {
+    address: Address,
+    rssi: i8,
+    name: String,
+    data: Vec<u8>,
+    decoded: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ScanResults {
+    results: Vec<ScanResult>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ConnComplete {
+    conn_handle: u16,
+    address: Address,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct EncryptionChange {
+    status: u8,
+    conn_handle: u16,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "method", content = "params")]
