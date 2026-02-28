@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use derive_more::{Constructor};
 use std::fmt;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -30,7 +31,7 @@ pub struct GattTable {
     attributes: Vec<Attribute>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Constructor, Debug)]
 pub struct Address {
     address_type: u8,
     address: u64,
@@ -80,15 +81,6 @@ pub struct UserProfile {
 }
 
 // ------ Impl ------
-
-impl Address {
-    pub fn new(address_type: u8, address: u64) -> Self {
-        Address {
-            address_type: address_type,
-            address: address,
-        }
-    }
-}
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
