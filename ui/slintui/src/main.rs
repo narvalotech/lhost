@@ -48,7 +48,6 @@ fn ui_main(tx_chan: mpsc::Sender<RemoteMethod>) {
                 tx_chan.blocking_send(cmd).unwrap();
             },
             Command::Disconnect => {
-                let address = Address::new(1, 0xC1234567890A);
                 let cmd = RemoteMethod::Disconnect {conn: 1};
                 tx_chan.blocking_send(cmd).unwrap();
             },
@@ -65,16 +64,6 @@ fn ui_main(tx_chan: mpsc::Sender<RemoteMethod>) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = LispClient::new("127.0.0.1:55000").await?;
 
-    let msg: String = client.call(RemoteMethod::Echo {
-        message: "Refactored!".into()
-    }).await?;
-    println!("Lisp said: {}", msg);
-
-    let rsp: String = client.call(RemoteMethod::Connect {
-        address : Address::new(1, 0xC1234567890A),
-    }).await?;
-    println!("Lisp said: {:?}", rsp);
-
     let (to_tokio_tx, mut to_tokio_rx) = mpsc::channel(10);
 
     let res = task::spawn_blocking(|| {
@@ -83,6 +72,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(res) = to_tokio_rx.recv().await {
         println!("JRPC THREAD: {:?}", res);
+        match res {
+            RemoteMethod::Connect { address: _ } => {
+                let rsp: String = client.call(res).await?;
+                println!("Lisp response {:?}", rsp);
+            },
+            _ => {},
+        }
     }
 
     println!("Exiting..");
