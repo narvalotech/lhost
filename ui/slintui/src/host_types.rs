@@ -70,6 +70,7 @@ pub enum RemoteMethod {
     Echo { message: String },
     GetUser { id: u64 },
     Connect { address: Address },
+    Disconnect { conn: u16 },
 }
 
 // Use this for complex data coming from Lisp

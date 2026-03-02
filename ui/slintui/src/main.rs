@@ -8,6 +8,7 @@ use slint::{ModelRc, SharedString, StandardListViewItem, VecModel};
 use std::rc::Rc;
 
 use tokio::task;
+use tokio::sync::mpsc;
 
 #[derive(Clone)]
 struct Device {
@@ -30,38 +31,30 @@ fn create_row_from_device(device: &Device) -> ModelRc<StandardListViewItem> {
     ModelRc::from(Rc::new(VecModel::from(row_data)))
 }
 
-fn ui_main() {
+fn ui_main(tx_chan: mpsc::Sender<RemoteMethod>) {
     let ui = AppWindow::new().unwrap();
 
     let ui_handle = ui.as_weak();
     let devices_: Box<Vec<Device>> = Box::new(Vec::new());
     let devices = Box::leak(devices_);
 
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            println!("Create device");
-
-            let new_device = Device {
-                address: Address::new(1, 0x00aA7DDA7113),
-                rssi: -65,
-                name: "Kitchen Sensor".into(),
-                data: "0x010203".into(),
-                _private_field: 42,
-            };
-            devices.push(new_device);
-
-            let devs = devices.clone();
-            ui_handle.upgrade_in_event_loop(move |ui| {
-                let devices_rows = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
-                ui.set_scan_results(ModelRc::from(devices_rows.clone()));
-
-                let devices_rows_copy = devices_rows.clone();
-                for device in devs {
-                    let row = create_row_from_device(&device);
-                    devices_rows_copy.push(row);
-                }
-            }).unwrap();
+    // Set up button commands
+    ui.on_button(move |id| {
+        println!("CALLBACK: {:?}", id);
+        match id {
+            Command::Connect => {
+                let address = Address::new(1, 0xC1234567890A);
+                let cmd = RemoteMethod::Connect {address} ;
+                tx_chan.blocking_send(cmd).unwrap();
+            },
+            Command::Disconnect => {
+                let address = Address::new(1, 0xC1234567890A);
+                let cmd = RemoteMethod::Disconnect {conn: 1};
+                tx_chan.blocking_send(cmd).unwrap();
+            },
+            _ => {
+                println!("UNHANDLED");
+            },
         }
     });
 
@@ -82,9 +75,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }).await?;
     println!("Lisp said: {:?}", rsp);
 
+    let (to_tokio_tx, mut to_tokio_rx) = mpsc::channel(10);
+
     let res = task::spawn_blocking(|| {
-        ui_main()
-    }).await.unwrap();
+        ui_main(to_tokio_tx);
+    });
+
+    while let Some(res) = to_tokio_rx.recv().await {
+        println!("JRPC THREAD: {:?}", res);
+    }
+
+    println!("Exiting..");
 
     Ok(())
 }
