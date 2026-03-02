@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use tokio::task;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 struct Device {
@@ -62,24 +63,51 @@ fn ui_main(tx_chan: mpsc::Sender<RemoteMethod>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = LispClient::new("127.0.0.1:55000").await?;
-
     let (to_tokio_tx, mut to_tokio_rx) = mpsc::channel(10);
 
     let res = task::spawn_blocking(|| {
         ui_main(to_tokio_tx);
     });
 
-    while let Some(res) = to_tokio_rx.recv().await {
-        println!("JRPC THREAD: {:?}", res);
-        match res {
-            RemoteMethod::Connect { address: _ } => {
-                let rsp: String = client.call(res).await?;
-                println!("Lisp response {:?}", rsp);
-            },
-            _ => {},
+    let token = CancellationToken::new();
+    let cloned_token = token.clone();
+
+    let events_tid = task::spawn(async move {
+        let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+
+        println!("startin events");
+
+        while let Some(evt) =
+        tokio::select! {
+            _ = cloned_token.cancelled() => {
+                println!("cancelled");
+                None
+            }
+            Ok(evt) = client.call::<String>(RemoteMethod::GetEvent) => {Some(evt)}
+        } {
+            println!("Got event: {:?}", evt);
         }
-    }
+
+        println!("quitting events");
+    });
+
+    let cmds_tid = task::spawn(async move {
+        let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+
+        while let Some(res) = to_tokio_rx.recv().await {
+            println!("JRPC THREAD: {:?}", res);
+            match res {
+                RemoteMethod::Connect { address: _ } => {
+                    let rsp: String = client.call(res).await.unwrap();
+                    println!("Lisp response {:?}", rsp);
+                },
+                _ => {},
+            }
+        }
+        token.cancel();
+    });
+
+    tokio::join!(events_tid, cmds_tid);
 
     println!("Exiting..");
 

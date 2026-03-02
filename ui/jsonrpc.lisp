@@ -17,11 +17,11 @@
                   ))
 
 ;; Example: Returning a complex 'UserProfile' struct to Rust
-(jsonrpc:expose *server* "get_user"
+(jsonrpc:expose *server* "get_event"
                 (lambda (args)
-                  (list (cons "id" (gethash "id" args))
-                        (cons "name" "Jon")
-                        (cons "roles" #("admin" "developer")))))
+                  (declare (ignore args))
+                  (sleep 2)
+                  (format nil "hola")))
 
 (jsonrpc:expose *server* "connect"
                 (lambda (args)

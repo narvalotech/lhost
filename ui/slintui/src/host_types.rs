@@ -67,18 +67,9 @@ pub struct EncryptionChange {
 #[serde(tag = "method", content = "params")]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteMethod {
-    Echo { message: String },
-    GetUser { id: u64 },
+    GetEvent,
     Connect { address: Address },
     Disconnect { conn: u16 },
-}
-
-// Use this for complex data coming from Lisp
-#[derive(Deserialize, Debug)]
-pub struct UserProfile {
-    pub id: u64,
-    pub name: String,
-    pub roles: Vec<String>,
 }
 
 // ------ Impl ------
