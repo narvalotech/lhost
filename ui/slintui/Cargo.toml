@@ -14,6 +14,7 @@ rand = "0.9"
 #slint = "1.14.1"
 slint = { version = "1.14.1", features = ["renderer-skia"] }
 tokio-util = "0.7.18"
+async-compat = "0.2.5"
 
 [build-dependencies]
 slint-build = "1.14.1"

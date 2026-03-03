@@ -10,6 +10,7 @@ use std::rc::Rc;
 use tokio::task;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use async_compat;
 
 #[derive(Clone)]
 struct Device {
@@ -32,12 +33,11 @@ fn create_row_from_device(device: &Device) -> ModelRc<StandardListViewItem> {
     ModelRc::from(Rc::new(VecModel::from(row_data)))
 }
 
-fn ui_main(tx_chan: mpsc::Sender<RemoteMethod>) {
+fn main() {
     let ui = AppWindow::new().unwrap();
-
     let ui_handle = ui.as_weak();
-    let devices_: Box<Vec<Device>> = Box::new(Vec::new());
-    let devices = Box::leak(devices_);
+
+    let (tx_chan, rx_chan) = mpsc::channel(10);
 
     // Set up button commands
     ui.on_button(move |id| {
@@ -58,17 +58,13 @@ fn ui_main(tx_chan: mpsc::Sender<RemoteMethod>) {
         }
     });
 
+    let slint_future = async_main(rx_chan, ui_handle);
+    slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
+
     ui.run().unwrap();
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (to_tokio_tx, mut to_tokio_rx) = mpsc::channel(10);
-
-    let res = task::spawn_blocking(|| {
-        ui_main(to_tokio_tx);
-    });
-
+async fn async_main(mut rx_chan: mpsc::Receiver<RemoteMethod>, ui_handle: slint::Weak<AppWindow>) -> Result<(), Box<dyn std::error::Error>> {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
 
@@ -77,16 +73,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("startin events");
 
+        let devices_: Box<Vec<Device>> = Box::new(Vec::new());
+        let devices = Box::leak(devices_);
+
         while let Some(evt) =
-        tokio::select! {
-            _ = cloned_token.cancelled() => {
-                println!("cancelled");
-                None
+            tokio::select! {
+                _ = cloned_token.cancelled() => {
+                    println!("cancelled");
+                    None
+                }
+                Ok(evt) = client.call::<String>(RemoteMethod::GetEvent) => {Some(evt)}
+            } {
+                println!("Got event: {:?}", evt);
+                {
+                    let new_device = Device {
+                        address: Address::new(1, 0x00aA7DDA7113),
+                        rssi: -65,
+                        name: "Kitchen Sensor".into(),
+                        data: "0x010203".into(),
+                        _private_field: 42,
+                    };
+
+                    devices.push(new_device);
+                    let devs = devices.clone();
+                    ui_handle.upgrade_in_event_loop(move |ui| {
+                        let devices_rows = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
+                        ui.set_scan_results(ModelRc::from(devices_rows.clone()));
+
+                        let devices_rows_copy = devices_rows.clone();
+                        for device in devs {
+                            let row = create_row_from_device(&device);
+                            devices_rows_copy.push(row);
+                        }
+                    }).unwrap();
+                }
             }
-            Ok(evt) = client.call::<String>(RemoteMethod::GetEvent) => {Some(evt)}
-        } {
-            println!("Got event: {:?}", evt);
-        }
 
         println!("quitting events");
     });
@@ -94,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cmds_tid = task::spawn(async move {
         let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
-        while let Some(res) = to_tokio_rx.recv().await {
+        while let Some(res) = rx_chan.recv().await {
             println!("JRPC THREAD: {:?}", res);
             match res {
                 RemoteMethod::Connect { address: _ } => {
