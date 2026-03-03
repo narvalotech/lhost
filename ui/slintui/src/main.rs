@@ -82,7 +82,7 @@ async fn async_main(mut rx_chan: mpsc::Receiver<RemoteMethod>, ui_handle: slint:
                     println!("cancelled");
                     None
                 }
-                Ok(evt) = client.call::<String>(RemoteMethod::GetEvent) => {Some(evt)}
+                Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
             } {
                 println!("Got event: {:?}", evt);
                 {
