@@ -37,13 +37,13 @@ pub struct Address {
     address: u64,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct ScanResult {
-    address: Address,
-    rssi: i8,
-    name: String,
-    data: Vec<u8>,
-    decoded: String,
+    pub address: Address,
+    pub rssi: i8,
+    pub name: String,
+    pub data: Vec<u8>,
+    pub decoded: String,
 }
 
 #[derive(Deserialize, Debug)]

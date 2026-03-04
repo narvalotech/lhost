@@ -12,56 +12,34 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone)]
-struct Device {
-    address: Address,
-    rssi: i32,
-    name: String,
-    data: String,
-    _private_field: u32,
-}
-
-fn create_row_from_device(device: &Device) -> ModelRc<StandardListViewItem> {
+fn scan_result_to_row(device: &ScanResult) -> ModelRc<StandardListViewItem> {
     let addr = format!("{}", device.address);
+    let data = format!("{:?}", device.data);
     let row_data = vec![
         StandardListViewItem::from(SharedString::from(&addr)),
         StandardListViewItem::from(SharedString::from(device.rssi.to_string())),
         StandardListViewItem::from(SharedString::from(&device.name)),
-        StandardListViewItem::from(SharedString::from(&device.data)),
+        StandardListViewItem::from(SharedString::from(&data)),
     ];
 
     ModelRc::from(Rc::new(VecModel::from(row_data)))
 }
 
-fn main() {
-    let ui = AppWindow::new().unwrap();
-    let ui_handle = ui.as_weak();
+fn ui_update_scan_results(devices: &Vec<ScanResult>, ui_handle: &slint::Weak<AppWindow>) {
+    let devs = devices.clone();
 
-    let (tx_chan, rx_chan) = mpsc::channel(10);
+    ui_handle
+        .upgrade_in_event_loop(move |ui| {
+            let device_rows = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
+            ui.set_scan_results(ModelRc::from(device_rows.clone()));
 
-    // Set up button commands
-    ui.on_button(move |id| {
-        println!("CALLBACK: {:?}", id);
-        match id {
-            Command::Connect => {
-                let address = Address::new(1, 0xC1234567890A);
-                let cmd = RemoteMethod::Connect { address };
-                tx_chan.blocking_send(cmd).unwrap();
+            let device_rows_copy = device_rows.clone();
+            for device in devs {
+                let row = scan_result_to_row(&device);
+                device_rows_copy.push(row);
             }
-            Command::Disconnect => {
-                let cmd = RemoteMethod::Disconnect { conn: 1 };
-                tx_chan.blocking_send(cmd).unwrap();
-            }
-            _ => {
-                println!("UNHANDLED");
-            }
-        }
-    });
-
-    let slint_future = async_main(rx_chan, ui_handle);
-    slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
-
-    ui.run().unwrap();
+        })
+        .unwrap();
 }
 
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
@@ -69,7 +47,7 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
 
     println!("startin events");
 
-    let devices_: Box<Vec<Device>> = Box::new(Vec::new());
+    let devices_: Box<Vec<ScanResult>> = Box::new(Vec::new());
     let devices = Box::leak(devices_); // mom can we have 'static
 
     while let Some(evt) = tokio::select! {
@@ -80,6 +58,8 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
         Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
     } {
         println!("Got event: {:?}", evt);
+        devices.push(evt);
+        ui_update_scan_results(devices, &ui_handle);
     }
 
     println!("quitting events");
@@ -116,4 +96,35 @@ async fn async_main(
     println!("Exiting..");
 
     Ok(())
+}
+
+fn main() {
+    let ui = AppWindow::new().unwrap();
+    let ui_handle = ui.as_weak();
+
+    let (tx_chan, rx_chan) = mpsc::channel(10);
+
+    // Set up button commands
+    ui.on_button(move |id| {
+        println!("CALLBACK: {:?}", id);
+        match id {
+            Command::Connect => {
+                let address = Address::new(1, 0xC1234567890A);
+                let cmd = RemoteMethod::Connect { address };
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            Command::Disconnect => {
+                let cmd = RemoteMethod::Disconnect { conn: 1 };
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            _ => {
+                println!("UNHANDLED");
+            }
+        }
+    });
+
+    let slint_future = async_main(rx_chan, ui_handle);
+    slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
+
+    ui.run().unwrap();
 }
