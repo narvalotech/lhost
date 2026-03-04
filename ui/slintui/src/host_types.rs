@@ -63,6 +63,13 @@ pub struct EncryptionChange {
     conn_handle: u16,
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEvent {
+    ScanResult(ScanResult),
+    ConnComplete(ConnComplete),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "method", content = "params")]
 #[serde(rename_all = "snake_case")]

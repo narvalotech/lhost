@@ -55,11 +55,18 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             println!("cancelled");
             None
         }
-        Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
+        Ok(evt) = client.call::<RemoteEvent>(RemoteMethod::GetEvent) => {Some(evt)}
     } {
         println!("Got event: {:?}", evt);
-        devices.push(evt);
-        ui_update_scan_results(devices, &ui_handle);
+        match evt {
+            RemoteEvent::ScanResult(res) => {
+                devices.push(res);
+                ui_update_scan_results(devices, &ui_handle);
+            }
+            RemoteEvent::ConnComplete(res) => {
+                println!("Got event: {:?}", res);
+            }
+        }
     }
 
     println!("quitting events");
@@ -82,7 +89,7 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
 }
 
 async fn async_main(
-    mut rx_chan: mpsc::Receiver<RemoteMethod>,
+    rx_chan: mpsc::Receiver<RemoteMethod>,
     ui_handle: slint::Weak<AppWindow>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let token = CancellationToken::new();
