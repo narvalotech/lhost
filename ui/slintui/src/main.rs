@@ -64,69 +64,50 @@ fn main() {
     ui.run().unwrap();
 }
 
+async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
+    let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+
+    println!("startin events");
+
+    let devices_: Box<Vec<Device>> = Box::new(Vec::new());
+    let devices = Box::leak(devices_); // mom can we have 'static
+
+    while let Some(evt) =
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                println!("cancelled");
+                None
+            }
+            Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
+        } {
+            println!("Got event: {:?}", evt);
+        }
+
+    println!("quitting events");
+}
+
+async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteMethod>) {
+    let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+
+    while let Some(res) = rx_chan.recv().await {
+        println!("JRPC THREAD: {:?}", res);
+        match res {
+            RemoteMethod::Connect { address: _ } => {
+                let rsp: String = client.call(res).await.unwrap();
+                println!("Lisp response {:?}", rsp);
+            },
+            _ => {},
+        }
+    }
+    cancel.cancel();
+}
+
 async fn async_main(mut rx_chan: mpsc::Receiver<RemoteMethod>, ui_handle: slint::Weak<AppWindow>) -> Result<(), Box<dyn std::error::Error>> {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
 
-    let events_tid = task::spawn(async move {
-        let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
-
-        println!("startin events");
-
-        let devices_: Box<Vec<Device>> = Box::new(Vec::new());
-        let devices = Box::leak(devices_);
-
-        while let Some(evt) =
-            tokio::select! {
-                _ = cloned_token.cancelled() => {
-                    println!("cancelled");
-                    None
-                }
-                Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
-            } {
-                println!("Got event: {:?}", evt);
-                {
-                    let new_device = Device {
-                        address: Address::new(1, 0x00aA7DDA7113),
-                        rssi: -65,
-                        name: "Kitchen Sensor".into(),
-                        data: "0x010203".into(),
-                        _private_field: 42,
-                    };
-
-                    devices.push(new_device);
-                    let devs = devices.clone();
-                    ui_handle.upgrade_in_event_loop(move |ui| {
-                        let devices_rows = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
-                        ui.set_scan_results(ModelRc::from(devices_rows.clone()));
-
-                        let devices_rows_copy = devices_rows.clone();
-                        for device in devs {
-                            let row = create_row_from_device(&device);
-                            devices_rows_copy.push(row);
-                        }
-                    }).unwrap();
-                }
-            }
-
-        println!("quitting events");
-    });
-
-    let cmds_tid = task::spawn(async move {
-        let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
-
-        while let Some(res) = rx_chan.recv().await {
-            println!("JRPC THREAD: {:?}", res);
-            match res {
-                RemoteMethod::Connect { address: _ } => {
-                    let rsp: String = client.call(res).await.unwrap();
-                    println!("Lisp response {:?}", rsp);
-                },
-                _ => {},
-            }
-        }
-        token.cancel();
-    });
+    let events_tid = task::spawn(backend_event_task(cloned_token, ui_handle));
+    let cmds_tid = task::spawn(backend_cmd_task(token, rx_chan));
 
     tokio::join!(events_tid, cmds_tid);
 
