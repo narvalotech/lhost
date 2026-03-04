@@ -1,8 +1,8 @@
 use crate::host_types::*;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use serde_json::Value;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpStream;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JsonRpcRequest {
@@ -38,9 +38,11 @@ impl LispClient {
 
     pub async fn call<T: for<'de> Deserialize<'de>>(
         &mut self,
-        method: RemoteMethod
+        method: RemoteMethod,
     ) -> Result<T, Box<dyn std::error::Error>>
-    where T: for<'de> Deserialize<'de>{
+    where
+        T: for<'de> Deserialize<'de>,
+    {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -72,7 +74,9 @@ impl LispClient {
             let mut line = String::new();
             self.reader.read_line(&mut line).await?;
             let trimmed = line.trim();
-            if trimmed.is_empty() { break; } // End of headers
+            if trimmed.is_empty() {
+                break;
+            } // End of headers
 
             if trimmed.to_lowercase().starts_with("content-length:") {
                 if let Some(val) = trimmed.split(':').nth(1) {

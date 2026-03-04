@@ -1,16 +1,16 @@
-mod rpc;
 mod host_types;
-use crate::rpc::{LispClient};
+mod rpc;
 use crate::host_types::*;
+use crate::rpc::LispClient;
 
 slint::include_modules!();
 use slint::{ModelRc, SharedString, StandardListViewItem, VecModel};
 use std::rc::Rc;
 
-use tokio::task;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use async_compat;
+use tokio::sync::mpsc;
+use tokio::task;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 struct Device {
@@ -45,16 +45,16 @@ fn main() {
         match id {
             Command::Connect => {
                 let address = Address::new(1, 0xC1234567890A);
-                let cmd = RemoteMethod::Connect {address} ;
+                let cmd = RemoteMethod::Connect { address };
                 tx_chan.blocking_send(cmd).unwrap();
-            },
+            }
             Command::Disconnect => {
-                let cmd = RemoteMethod::Disconnect {conn: 1};
+                let cmd = RemoteMethod::Disconnect { conn: 1 };
                 tx_chan.blocking_send(cmd).unwrap();
-            },
+            }
             _ => {
                 println!("UNHANDLED");
-            },
+            }
         }
     });
 
@@ -72,16 +72,15 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
     let devices_: Box<Vec<Device>> = Box::new(Vec::new());
     let devices = Box::leak(devices_); // mom can we have 'static
 
-    while let Some(evt) =
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                println!("cancelled");
-                None
-            }
-            Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
-        } {
-            println!("Got event: {:?}", evt);
+    while let Some(evt) = tokio::select! {
+        _ = cancel.cancelled() => {
+            println!("cancelled");
+            None
         }
+        Ok(evt) = client.call::<ScanResult>(RemoteMethod::GetEvent) => {Some(evt)}
+    } {
+        println!("Got event: {:?}", evt);
+    }
 
     println!("quitting events");
 }
@@ -95,14 +94,17 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
             RemoteMethod::Connect { address: _ } => {
                 let rsp: String = client.call(res).await.unwrap();
                 println!("Lisp response {:?}", rsp);
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     cancel.cancel();
 }
 
-async fn async_main(mut rx_chan: mpsc::Receiver<RemoteMethod>, ui_handle: slint::Weak<AppWindow>) -> Result<(), Box<dyn std::error::Error>> {
+async fn async_main(
+    mut rx_chan: mpsc::Receiver<RemoteMethod>,
+    ui_handle: slint::Weak<AppWindow>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let token = CancellationToken::new();
     let cloned_token = token.clone();
 

@@ -1,5 +1,5 @@
+use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
-use derive_more::{Constructor};
 use std::fmt;
 
 #[derive(Serialize, Deserialize, Debug)]

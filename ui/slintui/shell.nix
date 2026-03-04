@@ -19,7 +19,6 @@ in pkgs.mkShell {
     pkg-config
     cargo
     rustc
-    rustup
     rustfmt
     rust-analyzer
   ];
