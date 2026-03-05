@@ -7,12 +7,13 @@ import {
 
 component ScanResults inherits Rectangle {
     // StandardTableView rows are a model of models (a list of rows, where each row is a list of items)
-    in property <[[StandardListViewItem]]> device_rows: [];
+    in-out property <[[StandardListViewItem]]> device_rows: [];
+    in-out property <int> current-row: tv.current-row;
 
     min-width: 500px;
     min-height: 200px;
     VerticalLayout {
-        StandardTableView {
+        tv := StandardTableView {
             columns: [
                 { title: "Address", min-width: 50px },
                 { title: "RSSI" },
@@ -30,7 +31,8 @@ export component AppWindow inherits Window {
     // Define the callback here so Rust can "see" it
     callback button(Command);
 
-    in property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
+    in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
+    in-out property <int> selected_device <=> results.current-row;
 
     VerticalLayout {
         HorizontalLayout {

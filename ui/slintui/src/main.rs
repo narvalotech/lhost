@@ -4,7 +4,7 @@ use crate::host_types::*;
 use crate::rpc::LispClient;
 
 slint::include_modules!();
-use slint::{ModelRc, SharedString, StandardListViewItem, VecModel};
+use slint::{ModelRc, Model, SharedString, StandardListViewItem, VecModel};
 use std::rc::Rc;
 
 use async_compat;
@@ -40,6 +40,27 @@ fn ui_update_scan_results(devices: &Vec<ScanResult>, ui_handle: &slint::Weak<App
             }
         })
         .unwrap();
+}
+
+fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
+    if let Some(ui) = ui_handle.upgrade() {
+        let current_row: i32 = ui.get_selected_device().try_into().unwrap();
+        if current_row < 0 {
+            return None;
+        }
+
+        let device_rows = ui.get_scan_results();
+        let the_model = device_rows.as_any().downcast_ref::<VecModel<ModelRc<StandardListViewItem>>>()
+            .expect("We know we set a VecModel earlier");
+        if let Some(data) = the_model.row_data(current_row as usize) {
+            let the_model = data.as_any().downcast_ref::<VecModel<StandardListViewItem>>().unwrap();
+            if let Some( StandardListViewItem { text, .. }) = the_model.row_data(0) {
+                // TODO: parse back into Address
+                println!("{:?}", text);
+            }
+        }
+    }
+    None
 }
 
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
@@ -112,10 +133,15 @@ fn main() {
     let (tx_chan, rx_chan) = mpsc::channel(10);
 
     // Set up button commands
+    let ui_handle_in_cb = ui_handle.clone();
     ui.on_button(move |id| {
         println!("CALLBACK: {:?}", id);
         match id {
+            Command::Bond => {
+                let _idx = get_current_row(&ui_handle_in_cb);
+            }
             Command::Connect => {
+                let _idx = get_current_row(&ui_handle_in_cb);
                 let address = Address::new(1, 0xC1234567890A);
                 let cmd = RemoteMethod::Connect { address };
                 tx_chan.blocking_send(cmd).unwrap();
