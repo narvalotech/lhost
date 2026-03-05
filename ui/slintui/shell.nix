@@ -1,17 +1,18 @@
 { pkgs ? import <nixpkgs> { } }:
 
 let
-  # These are the libraries that Slint/Winit try to load at runtime
   runtimeLibs = with pkgs; [
     libxkbcommon
     wayland
     vulkan-loader
     libGL
-    # If you use X11, you might also need these:
-    # xorg.libX11
-    # xorg.libXcursor
-    # xorg.libXi
-    # xorg.libXrandr
+    stdenv.cc.cc.lib
+
+    # Technically runtime, but using mold forces us
+    # to also have them at build-time.
+    fontconfig
+    freetype
+    expat
   ];
 
 in pkgs.mkShell {
@@ -21,18 +22,16 @@ in pkgs.mkShell {
     rustc
     rustfmt
     rust-analyzer
+    mold
   ];
 
-  buildInputs = with pkgs; [
-    fontconfig
-    freetype
-    expat
-  ] ++ runtimeLibs;
+  buildInputs = runtimeLibs;
 
-  # This makes the libraries available to the linker
-  env.RUSTFLAGS = "-C link-arg=-Wl,-rpath,${pkgs.lib.makeLibraryPath runtimeLibs}";
+  env.RUSTFLAGS = (
+    "-C link-arg=-fuse-ld=mold " +
+    "-C link-arg=-Wl,-rpath,${pkgs.lib.makeLibraryPath runtimeLibs}"
+  );
 
-  # This makes the libraries available at RUNTIME (critical for dlopen)
   shellHook = ''
     export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
   '';
