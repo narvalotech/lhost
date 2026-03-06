@@ -57,7 +57,7 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
             let the_model = data.as_any().downcast_ref::<VecModel<StandardListViewItem>>().unwrap();
             if let Some( StandardListViewItem { text, .. }) = the_model.row_data(0) {
                 if let Ok(address) = Address::from_str(text.as_str()) {
-                    println!("{}", address);
+                    return Some(address);
                 }
             }
         }
@@ -139,14 +139,11 @@ fn main() {
     ui.on_button(move |id| {
         println!("CALLBACK: {:?}", id);
         match id {
-            Command::Bond => {
-                let _idx = get_current_row(&ui_handle_in_cb);
-            }
             Command::Connect => {
-                let _idx = get_current_row(&ui_handle_in_cb);
-                let address = Address::new(1, 0xC1234567890A);
-                let cmd = RemoteMethod::Connect { address };
-                tx_chan.blocking_send(cmd).unwrap();
+                if let Some(address) = get_current_row(&ui_handle_in_cb) {
+                    let cmd = RemoteMethod::Connect { address };
+                    tx_chan.blocking_send(cmd).unwrap();
+                }
             }
             Command::Disconnect => {
                 let cmd = RemoteMethod::Disconnect { conn: 1 };

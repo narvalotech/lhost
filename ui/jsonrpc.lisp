@@ -28,13 +28,14 @@
 
 ;; Example: Returning a complex 'UserProfile' struct to Rust
 (jsonrpc:expose *server* "get_event"
-                (lambda (args)
-                  (declare (ignore args))
-                  (sleep .5)
-                  (make-scan-result
-                   '(1 #x00aA7DDA7114)
-                   -90 "hello from lisp"
-                   #(1 2 3 4 5) "my-adv-data")))
+                (let ((addr #x00aA7DDA7114))
+                  (lambda (args)
+                    (declare (ignore args))
+                    (sleep 1)
+                    (make-scan-result
+                     (list 1 (incf addr))
+                     -90 "hello from lisp"
+                     #(1 2 3 4 5) "my-adv-data"))))
 
 (jsonrpc:expose *server* "connect"
                 (lambda (args)
