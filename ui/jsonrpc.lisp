@@ -26,19 +26,35 @@
                     (cons "data" data)
                     (cons "decoded" decoded)))))
 
+(defun make-conn-complete (address)
+  (list (cons "conn_complete"
+              (list (cons "conn_handle" #x0013)
+                    (cons "address"
+                          (list (cons "address_type" (car address))
+                                (cons "address" (cadr address))))))))
+
+(defvar *sent-connect* nil)
+
 ;; Example: Returning a complex 'UserProfile' struct to Rust
 (jsonrpc:expose *server* "get_event"
                 (let ((addr #x00aA7DDA7114))
                   (lambda (args)
                     (declare (ignore args))
                     (sleep 1)
-                    (make-scan-result
-                     (list 1 (incf addr))
-                     -90 "hello from lisp"
-                     #(1 2 3 4 5) "my-adv-data"))))
+                    (if *sent-connect*
+                        (let ((address *sent-connect*))
+                          (setf *sent-connect* nil)
+                          (make-conn-complete address))
+                        (make-scan-result
+                         (list 1 (incf addr))
+                         -90 "hello from lisp"
+                         #(1 2 3 4 5) "my-adv-data")))))
 
 (jsonrpc:expose *server* "connect"
                 (lambda (args)
+                  (setf *sent-connect*
+                        (list (gethash "address_type" (gethash "address" args))
+                              (gethash "address" (gethash "address" args))))
                   (format nil "Connected to (~X) ~X"
                           (gethash "address_type" (gethash "address" args))
                           (gethash "address" (gethash "address" args)))))

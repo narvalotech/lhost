@@ -52,7 +52,7 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
 
         let device_rows = ui.get_scan_results();
         let the_model = device_rows.as_any().downcast_ref::<VecModel<ModelRc<StandardListViewItem>>>()
-            .expect("We know we set a VecModel earlier");
+            .expect("Wrong row type");
         if let Some(data) = the_model.row_data(current_row as usize) {
             let the_model = data.as_any().downcast_ref::<VecModel<StandardListViewItem>>().unwrap();
             if let Some( StandardListViewItem { text, .. }) = the_model.row_data(0) {
@@ -88,6 +88,7 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             }
             RemoteEvent::ConnComplete(res) => {
                 println!("Got event: {:?}", res);
+                // TODO: create tab here
             }
         }
     }
