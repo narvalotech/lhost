@@ -6,6 +6,7 @@ use crate::rpc::LispClient;
 slint::include_modules!();
 use slint::{ModelRc, Model, SharedString, StandardListViewItem, VecModel};
 use std::rc::Rc;
+use std::str::FromStr;
 
 use async_compat;
 use tokio::sync::mpsc;
@@ -55,8 +56,9 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
         if let Some(data) = the_model.row_data(current_row as usize) {
             let the_model = data.as_any().downcast_ref::<VecModel<StandardListViewItem>>().unwrap();
             if let Some( StandardListViewItem { text, .. }) = the_model.row_data(0) {
-                // TODO: parse back into Address
-                println!("{:?}", text);
+                if let Ok(address) = Address::from_str(text.as_str()) {
+                    println!("{}", address);
+                }
             }
         }
     }
