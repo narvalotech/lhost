@@ -1,36 +1,46 @@
 import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
+struct DashboardData {
+    title: string,
+    counter: int,
+}
+
+component DashboardView inherits Rectangle {
+    in property <DashboardData> data;
+    background: #333;
+    border-width: 1px;
+    border-color: gray;
+
+    Text {
+        text: "View: " + root.data.title + " | Value: " + root.data.counter;
+        color: white;
+    }
+}
+
 export component AppWindow inherits Window {
-    // 1. Define your data model
-    in property <[string]> tab_names: ["Dashboard", "Analytics", "Settings", "Logs"];
-    property <int> active_tab: 0;
+    // Rust will provide this list
+    in property <[DashboardData]> all_dashboards: [{title: "one", counter: 1}, {title: "two", counter: 2}];
+    in-out property <int> active_idx: 0;
 
     VerticalBox {
-        alignment: start;
-
-        // 2. The "Programmatic" Tab Header
+        // Tab Headers
         HorizontalBox {
-            alignment: start;
-            padding: 0;
-            spacing: 5px;
-
-            for name[i] in tab_names : Button {
-                text: name;
-                // Highlight the active tab
-                primary: root.active_tab == i;
-                clicked => { root.active_tab = i; }
+            for dash[i] in root.all_dashboards : Button {
+                text: dash.title;
+                clicked => { root.active_idx = i; }
             }
         }
 
-        // 3. Dynamic Content Area
+        // The View Area
         Rectangle {
-            border-radius: 4px;
-            min-height: 200px;
+            height: 200px;
+            width: 200px;
 
-            Text {
-                text: "Showing content for: " + root.tab_names[root.active_tab];
-                color: white;
-                font-size: 18px;
+            // This creates an instance for EVERY item in the Rust Vec
+            for dash[i] in root.all_dashboards : DashboardView {
+                data: dash;
+                // Only show the one we selected
+                visible: root.active_idx == i;
             }
         }
     }
