@@ -3,6 +3,8 @@ import {
     StandardTableView,
     TextEdit,
     TabWidget,
+    HorizontalBox,
+    VerticalBox
 } from "std-widgets.slint";
 
 component ScanResults inherits Rectangle {
@@ -25,6 +27,23 @@ component ScanResults inherits Rectangle {
     }
 }
 
+struct DeviceData {
+    address: string,
+    text: string,               // this will be a GATT view later
+}
+
+component DeviceView inherits Rectangle {
+    in property <DeviceData> data;
+    background: #333;
+    border-width: 1px;
+    border-color: gray;
+
+    Text {
+        text: "View: " + root.data.address + " | Value: " + root.data.text;
+        color: white;
+    }
+}
+
 export enum Command { start-scan, stop-scan, connect, bond, disconnect }
 
 export component AppWindow inherits Window {
@@ -33,6 +52,8 @@ export component AppWindow inherits Window {
 
     in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
     in-out property <int> selected_device <=> results.current-row;
+    in-out property <[DeviceData]> all-devices: [{address: "one", text: "hola"}, {address: "two", text: "halo"}];
+    in-out property <int> active-tab: 0;
 
     VerticalLayout {
         HorizontalLayout {
@@ -70,17 +91,35 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 10px;
                 spacing: 10px;
-                TabWidget {
-                    Tab {
-                        title: "Scan results";
-                        results := ScanResults { }
+                property<bool> scan-focused: true;
+
+                VerticalBox {
+                    padding: 0px;
+                    HorizontalBox {
+                        padding: 0px;
+                        Button {
+                            text: "Scan results";
+                            clicked => { scan-focused = true; }
+                        }
+
+                        for device[i] in root.all-devices : Button {
+                            text: device.address;
+                            clicked => { root.active-tab = i+1; scan-focused = false; }
+                        }
                     }
 
-                    Tab {
-                        title: "Device A";
+                    Rectangle {
+                        min-height: 300px;
+                        min-width: 600px;
+
                         Rectangle {
-                            min-height: 200px;
-                            background: orange;
+                            results := ScanResults { }
+                            visible: scan-focused;
+                        }
+
+                        for device[i] in root.all-devices : DeviceView {
+                            data: device;
+                            visible: (root.active-tab == i+1) && !scan-focused;
                         }
                     }
                 }
