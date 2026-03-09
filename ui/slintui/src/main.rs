@@ -26,6 +26,17 @@ fn scan_result_to_row(device: &ScanResult) -> ModelRc<StandardListViewItem> {
     ModelRc::from(Rc::new(VecModel::from(row_data)))
 }
 
+fn ui_update_devices(devices: &Vec<DeviceData>, ui_handle: &slint::Weak<AppWindow>) {
+    let devs = devices.clone();
+
+    ui_handle
+        .upgrade_in_event_loop(move |ui| {
+            let device_list = Rc::new(VecModel::from(devs));
+            ui.set_all_devices(device_list.clone().into());
+        })
+        .unwrap();
+}
+
 fn ui_update_scan_results(devices: &Vec<ScanResult>, ui_handle: &slint::Weak<AppWindow>) {
     let devs = devices.clone();
 
@@ -73,6 +84,9 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
     let devices_: Box<Vec<ScanResult>> = Box::new(Vec::new());
     let devices = Box::leak(devices_); // mom can we have 'static
 
+    let conns_: Box<Vec<DeviceData>> = Box::new(Vec::new());
+    let conns = Box::leak(conns_);
+
     while let Some(evt) = tokio::select! {
         _ = cancel.cancelled() => {
             println!("cancelled");
@@ -88,7 +102,10 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             }
             RemoteEvent::ConnComplete(res) => {
                 println!("Got event: {:?}", res);
-                // TODO: create tab here
+                let res = res.address;
+                let c = DeviceData { address: res.to_string().into(), text: "hello".into() };
+                conns.push(c);
+                ui_update_devices(conns, &ui_handle);
             }
         }
     }

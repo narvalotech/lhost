@@ -52,7 +52,7 @@ export component AppWindow inherits Window {
 
     in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
     in-out property <int> selected_device <=> results.current-row;
-    in-out property <[DeviceData]> all-devices: [{address: "one", text: "hola"}, {address: "two", text: "halo"}];
+    in-out property <[DeviceData]> all-devices: [];
     in-out property <int> active-tab: 0;
 
     VerticalLayout {

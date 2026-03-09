@@ -54,8 +54,8 @@ pub struct ScanResults {
 
 #[derive(Deserialize, Debug)]
 pub struct ConnComplete {
-    conn_handle: u16,
-    address: Address,
+    pub conn_handle: u16,
+    pub address: Address,
 }
 
 #[derive(Deserialize, Debug)]
