@@ -59,6 +59,11 @@ pub struct ConnComplete {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct Disconnected {
+    pub conn_handle: u16,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct EncryptionChange {
     status: u8,
     conn_handle: u16,
@@ -69,6 +74,7 @@ pub struct EncryptionChange {
 pub enum RemoteEvent {
     ScanResult(ScanResult),
     ConnComplete(ConnComplete),
+    Disconnected(Disconnected),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

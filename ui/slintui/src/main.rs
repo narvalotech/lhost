@@ -101,10 +101,14 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
                 ui_update_scan_results(devices, &ui_handle);
             }
             RemoteEvent::ConnComplete(res) => {
-                println!("Got event: {:?}", res);
-                let res = res.address;
-                let c = DeviceData { address: res.to_string().into(), text: "hello".into() };
+                let a = res.address;
+                let c = DeviceData { address: a.to_string().into(), conn: res.conn_handle as i32, text: "hello".into() };
                 conns.push(c);
+                ui_update_devices(conns, &ui_handle);
+            }
+            RemoteEvent::Disconnected(res) => {
+                let conn = res.conn_handle;
+                let _ = conns.extract_if(.., |c| c.conn as u16 == conn).collect::<Vec<_>>();
                 ui_update_devices(conns, &ui_handle);
             }
         }
@@ -120,6 +124,10 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
         println!("JRPC THREAD: {:?}", res);
         match res {
             RemoteMethod::Connect { address: _ } => {
+                let rsp: String = client.call(res).await.unwrap();
+                println!("Lisp response {:?}", rsp);
+            }
+            RemoteMethod::Disconnect { conn: _ } => {
                 let rsp: String = client.call(res).await.unwrap();
                 println!("Lisp response {:?}", rsp);
             }
@@ -178,3 +186,19 @@ fn main() {
 
     ui.run().unwrap();
 }
+
+// Road to feature-parity
+// - scan
+//   - [x] scanned device view
+//   - [ ] display merged AD
+//   - [ ] sort by rssi / name
+//   - [ ] filter addr/name
+// - connect
+//   - [ ] log view (gatt operations)
+//   - [ ] gatt listview
+//   - [x] add/delete tab on connected/disconnected events
+//   - [ ] encrypt / bond management
+// - gatt
+//   - [ ] discovery
+//   - [ ] read/write
+//   - [ ] notify

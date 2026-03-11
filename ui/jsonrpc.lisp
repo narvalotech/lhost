@@ -26,14 +26,22 @@
                     (cons "data" data)
                     (cons "decoded" decoded)))))
 
+(defparameter *handle* #x0010)
 (defun make-conn-complete (address)
   (list (cons "conn_complete"
-              (list (cons "conn_handle" #x0013)
+              (list (cons "conn_handle" (incf *handle*))
                     (cons "address"
                           (list (cons "address_type" (car address))
                                 (cons "address" (cadr address))))))))
 
-(defvar *sent-connect* nil)
+(defun make-disconnected ()
+  (let ((handle *handle*))
+    (decf *handle*)
+    (list (cons "disconnected"
+                (list (cons "conn_handle" handle))))))
+
+(defvar *send-connect* nil)
+(defvar *send-disconnect* nil)
 
 ;; Example: Returning a complex 'UserProfile' struct to Rust
 (jsonrpc:expose *server* "get_event"
@@ -41,23 +49,36 @@
                   (lambda (args)
                     (declare (ignore args))
                     (sleep 1)
-                    (if *sent-connect*
-                        (let ((address *sent-connect*))
-                          (setf *sent-connect* nil)
-                          (make-conn-complete address))
-                        (make-scan-result
-                         (list 1 (incf addr))
-                         -90 "hello from lisp"
-                         #(1 2 3 4 5) "my-adv-data")))))
+                    (cond
+                      (*send-connect*
+                       (let ((address *send-connect*))
+                         (setf *send-connect* nil)
+                         (make-conn-complete address)))
+
+                      (*send-disconnect*
+                       (progn
+                         (setf *send-disconnect* nil)
+                         (make-disconnected)))
+
+                      (t
+                       (make-scan-result
+                        (list 1 (incf addr))
+                        -90 "hello from lisp"
+                        #(1 2 3 4 5) "my-adv-data"))))))
 
 (jsonrpc:expose *server* "connect"
                 (lambda (args)
-                  (setf *sent-connect*
+                  (setf *send-connect*
                         (list (gethash "address_type" (gethash "address" args))
                               (gethash "address" (gethash "address" args))))
                   (format nil "Connected to (~X) ~X"
                           (gethash "address_type" (gethash "address" args))
                           (gethash "address" (gethash "address" args)))))
+
+(jsonrpc:expose *server* "disconnect"
+                (lambda (args)
+                  (setf *send-disconnect* (gethash "conn" args))
+                  (format nil "Disconnected from ~X" *send-disconnect*)))
 
 (defparameter *events* nil)
 (defun get-events ()
