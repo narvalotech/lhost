@@ -37,42 +37,38 @@ fn ui_update_devices(devices: &Vec<DeviceData>, ui_handle: &slint::Weak<AppWindo
         .unwrap();
 }
 
-fn ui_update_scan_results(devices: &Vec<ScanResult>, ui_handle: &slint::Weak<AppWindow>) {
-    let devs = devices.clone();
-
+fn ui_add_scan_result(ui_handle: &slint::Weak<AppWindow>, item: ScanResult) {
+    // TODO
+    // make to and from row converters
+    let item = item.clone();
     ui_handle
         .upgrade_in_event_loop(move |ui| {
-            let device_rows = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
-            ui.set_scan_results(ModelRc::from(device_rows.clone()));
-
-            let device_rows_copy = device_rows.clone();
-            for device in devs {
-                let row = scan_result_to_row(&device);
-                device_rows_copy.push(row);
-            }
+            let device_rows = ui.get_scan_results_storage();
+            let the_model = device_rows.as_any().downcast_ref::<VecModel<ModelRc<StandardListViewItem>>>()
+                .expect("Wrong row type");
+            the_model.push(scan_result_to_row(&item));
         })
         .unwrap();
 }
 
 fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
-    if let Some(ui) = ui_handle.upgrade() {
-        let current_row: i32 = ui.get_selected_device().try_into().unwrap();
-        if current_row < 0 {
-            return None;
-        }
+    let ui = ui_handle.upgrade()?;
 
-        let device_rows = ui.get_scan_results();
-        let the_model = device_rows.as_any().downcast_ref::<VecModel<ModelRc<StandardListViewItem>>>()
-            .expect("Wrong row type");
-        if let Some(data) = the_model.row_data(current_row as usize) {
-            let the_model = data.as_any().downcast_ref::<VecModel<StandardListViewItem>>().unwrap();
-            if let Some( StandardListViewItem { text, .. }) = the_model.row_data(0) {
-                if let Ok(address) = Address::from_str(text.as_str()) {
-                    return Some(address);
-                }
+    let selected_index: i32 = ui.get_selected_device();
+    if selected_index < 0 {
+        return None;
+    }
+
+    let model = ui.get_scan_results();
+
+    if let Some(row) = model.row_data(selected_index as usize) {
+        if let Some(col_item) = row.row_data(0) {
+            if let Ok(address) = Address::from_str(col_item.text.as_str()) {
+                return Some(address);
             }
         }
     }
+
     None
 }
 
@@ -80,9 +76,6 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
     println!("startin events");
-
-    let devices_: Box<Vec<ScanResult>> = Box::new(Vec::new());
-    let devices = Box::leak(devices_); // mom can we have 'static
 
     let conns_: Box<Vec<DeviceData>> = Box::new(Vec::new());
     let conns = Box::leak(conns_);
@@ -97,8 +90,7 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
         println!("Got event: {:?}", evt);
         match evt {
             RemoteEvent::ScanResult(res) => {
-                devices.push(res);
-                ui_update_scan_results(devices, &ui_handle);
+                ui_add_scan_result(&ui_handle, res);
             }
             RemoteEvent::ConnComplete(res) => {
                 let a = res.address;
@@ -181,6 +173,36 @@ fn main() {
         }
     });
 
+    let device_rows = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
+    ui.set_scan_results_storage(ModelRc::from(device_rows.clone()));
+    ui.set_scan_results(device_rows.clone().into());
+
+    let base_model_handle = device_rows.clone();
+
+    ui.on_sort_scan_results_cb(move |col_index, ascending| {
+        let ui = ui_handle.unwrap();
+
+        let base_model = base_model_handle.clone();
+
+        let sorted_model = base_model.sort_by(move |row_a, row_b| {
+            let val_a = row_a.row_data(col_index as usize).map(|i| i.text).unwrap_or_default();
+            let val_b = row_b.row_data(col_index as usize).map(|i| i.text).unwrap_or_default();
+
+            let ord = if col_index == 1 {
+                let n_a: i32 = val_a.parse().unwrap_or(0);
+                let n_b: i32 = val_b.parse().unwrap_or(0);
+                n_a.cmp(&n_b)
+            } else {
+                val_a.cmp(&val_b)
+            };
+
+            if ascending { ord } else { ord.reverse() }
+        });
+
+        ui.set_scan_results(ModelRc::from(Rc::new(sorted_model)));
+    });
+
+    let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
     slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
 
@@ -191,7 +213,7 @@ fn main() {
 // - scan
 //   - [x] scanned device view
 //   - [ ] display merged AD
-//   - [ ] sort by rssi / name
+//   - [x] sort by rssi / name
 //   - [ ] filter addr/name
 // - connect
 //   - [ ] log view (gatt operations)

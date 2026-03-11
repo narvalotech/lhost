@@ -42,13 +42,31 @@
 
 (defvar *send-connect* nil)
 (defvar *send-disconnect* nil)
+(defparameter *rssi* 0)
+(defun make-rssi ()
+  (- (random 100)))
+(defparameter *n1*
+  '("zealous"
+    "big"
+    "small"
+    "fuzzy"))
+(defparameter *n2*
+  '("meerkat"
+    "automobile"
+    "thing"
+    "ball"))
+(defun make-name ()
+  (format nil "~A-~A"
+          (nth (random (length *n1*)) *n1*)
+          (nth (random (length *n2*)) *n2*)))
+(make-name)
 
 ;; Example: Returning a complex 'UserProfile' struct to Rust
 (jsonrpc:expose *server* "get_event"
                 (let ((addr #x00aA7DDA7114))
                   (lambda (args)
                     (declare (ignore args))
-                    (sleep 1)
+                    (sleep .1)
                     (cond
                       (*send-connect*
                        (let ((address *send-connect*))
@@ -63,7 +81,7 @@
                       (t
                        (make-scan-result
                         (list 1 (incf addr))
-                        -90 "hello from lisp"
+                        (make-rssi) (make-name)
                         #(1 2 3 4 5) "my-adv-data"))))))
 
 (jsonrpc:expose *server* "connect"

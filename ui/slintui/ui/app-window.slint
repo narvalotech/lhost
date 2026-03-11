@@ -11,11 +11,15 @@ component ScanResults inherits Rectangle {
     // StandardTableView rows are a model of models (a list of rows, where each row is a list of items)
     in-out property <[[StandardListViewItem]]> device_rows: [];
     in-out property <int> current-row: tv.current-row;
+    callback sort-scan-results-cb(int, bool);
 
     min-width: 500px;
     min-height: 200px;
     VerticalLayout {
         tv := StandardTableView {
+            sort-ascending(idx) => { sort-scan-results-cb(idx, true); }
+            sort-descending(idx) => { sort-scan-results-cb(idx, false); }
+
             columns: [
                 { title: "Address", min-width: 50px },
                 { title: "RSSI" },
@@ -51,10 +55,13 @@ export component AppWindow inherits Window {
     // Define the callback here so Rust can "see" it
     callback button(Command);
 
+    in-out property <[[StandardListViewItem]]> scan_results_storage;
     in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
     in-out property <int> selected_device <=> results.current-row;
     in-out property <[DeviceData]> all-devices: [];
     in-out property <int> active-tab: 0;
+
+    callback sort-scan-results-cb(int, bool);
 
     VerticalLayout {
         HorizontalLayout {
@@ -114,7 +121,7 @@ export component AppWindow inherits Window {
                         min-width: 600px;
 
                         Rectangle {
-                            results := ScanResults { }
+                            results := ScanResults { sort-scan-results-cb(idx, asc) => { root.sort-scan-results-cb(idx, asc); }}
                             visible: scan-focused;
                         }
 
