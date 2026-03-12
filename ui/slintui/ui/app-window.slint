@@ -2,6 +2,7 @@ import {
     Button,
     StandardTableView,
     TextEdit,
+    LineEdit,
     TabWidget,
     HorizontalBox,
     VerticalBox
@@ -51,6 +52,12 @@ component DeviceView inherits Rectangle {
 
 export enum Command { start-scan, stop-scan, connect, bond, disconnect }
 
+export struct ScanFilter {
+    text: string,
+    column: int,
+    ascending: bool,
+}
+
 export component AppWindow inherits Window {
     // Define the callback here so Rust can "see" it
     callback button(Command);
@@ -60,8 +67,9 @@ export component AppWindow inherits Window {
     in-out property <int> selected_device <=> results.current-row;
     in-out property <[DeviceData]> all-devices: [];
     in-out property <int> active-tab: 0;
+    in-out property <ScanFilter> scan-filter: {text: "", column: 1, ascending: false};
 
-    callback sort-scan-results-cb(int, bool);
+    callback filter-scan-results(ScanFilter);
 
     VerticalLayout {
         HorizontalLayout {
@@ -120,9 +128,26 @@ export component AppWindow inherits Window {
                         min-height: 300px;
                         min-width: 600px;
 
-                        Rectangle {
-                            results := ScanResults { sort-scan-results-cb(idx, asc) => { root.sort-scan-results-cb(idx, asc); }}
+                        VerticalBox {
                             visible: scan-focused;
+
+                            LineEdit {
+                                placeholder-text: "Device filter (name/address)";
+                                edited(text) => {
+                                    root.scan-filter.text = text;
+                                    root.filter-scan-results(scan-filter);
+                                }
+                            }
+
+                            Rectangle {
+                                results := ScanResults {
+                                    sort-scan-results-cb(idx, asc) => {
+                                        root.scan-filter.column = idx;
+                                        root.scan-filter.ascending = asc;
+                                        root.filter-scan-results(scan-filter);
+                                    }
+                                }
+                            }
                         }
 
                         for device[i] in root.all-devices : DeviceView {

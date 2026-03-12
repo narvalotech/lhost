@@ -4,7 +4,7 @@ use crate::host_types::*;
 use crate::rpc::LispClient;
 
 slint::include_modules!();
-use slint::{ModelRc, Model, SharedString, StandardListViewItem, VecModel};
+use slint::{ModelRc, Model, SharedString, StandardListViewItem, FilterModel, VecModel};
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -148,17 +148,16 @@ async fn async_main(
 
 fn main() {
     let ui = AppWindow::new().unwrap();
-    let ui_handle = ui.as_weak();
 
     let (tx_chan, rx_chan) = mpsc::channel(10);
 
     // Set up button commands
-    let ui_handle_in_cb = ui_handle.clone();
+    let ui_handle = ui.as_weak();
     ui.on_button(move |id| {
         println!("CALLBACK: {:?}", id);
         match id {
             Command::Connect => {
-                if let Some(address) = get_current_row(&ui_handle_in_cb) {
+                if let Some(address) = get_current_row(&ui_handle) {
                     let cmd = RemoteMethod::Connect { address };
                     tx_chan.blocking_send(cmd).unwrap();
                 }
@@ -177,14 +176,24 @@ fn main() {
     ui.set_scan_results_storage(ModelRc::from(device_rows.clone()));
     ui.set_scan_results(device_rows.clone().into());
 
+    let ui_handle = ui.as_weak();
     let base_model_handle = device_rows.clone();
+    ui.on_filter_scan_results(move |filter| {
+        let col_index = filter.column;
+        let ascending = filter.ascending;
+        let text = filter.text;
 
-    ui.on_sort_scan_results_cb(move |col_index, ascending| {
         let ui = ui_handle.unwrap();
-
         let base_model = base_model_handle.clone();
 
-        let sorted_model = base_model.sort_by(move |row_a, row_b| {
+        let filtered_model = FilterModel::new(base_model, move |row| {
+            let filter = text.as_str();
+            let address = row.row_data(0).map(|i| i.text).unwrap_or_default();
+            let name = row.row_data(2).map(|i| i.text).unwrap_or_default();
+            address.contains(filter) || name.contains(filter)
+        });
+
+        let sorted_model = filtered_model.sort_by(move |row_a, row_b| {
             let val_a = row_a.row_data(col_index as usize).map(|i| i.text).unwrap_or_default();
             let val_b = row_b.row_data(col_index as usize).map(|i| i.text).unwrap_or_default();
 
@@ -214,7 +223,7 @@ fn main() {
 //   - [x] scanned device view
 //   - [ ] display merged AD
 //   - [x] sort by rssi / name
-//   - [ ] filter addr/name
+//   - [x] filter addr/name
 // - connect
 //   - [ ] log view (gatt operations)
 //   - [ ] gatt listview
