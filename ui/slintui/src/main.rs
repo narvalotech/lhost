@@ -13,6 +13,9 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio_util::sync::CancellationToken;
 
+use std::fs::OpenOptions;
+use tracing::{info, error, Level};
+
 fn scan_result_to_row(device: &ScanResult) -> ModelRc<StandardListViewItem> {
     let addr = format!("{}", device.address);
     let data = format!("{:?}", device.data);
@@ -75,19 +78,19 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
-    println!("startin events");
+    info!("startin events");
 
     let conns_: Box<Vec<DeviceData>> = Box::new(Vec::new());
     let conns = Box::leak(conns_);
 
     while let Some(evt) = tokio::select! {
         _ = cancel.cancelled() => {
-            println!("cancelled");
+            info!("cancelled");
             None
         }
         Ok(evt) = client.call::<RemoteEvent>(RemoteMethod::GetEvent) => {Some(evt)}
     } {
-        println!("Got event: {:?}", evt);
+        info!("Got event: {:?}", evt);
         match evt {
             RemoteEvent::ScanResult(res) => {
                 ui_add_scan_result(&ui_handle, res);
@@ -106,22 +109,22 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
         }
     }
 
-    println!("quitting events");
+    info!("quitting events");
 }
 
 async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteMethod>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
     while let Some(res) = rx_chan.recv().await {
-        println!("JRPC THREAD: {:?}", res);
+        info!("JRPC THREAD: {:?}", res);
         match res {
             RemoteMethod::Connect { address: _ } => {
                 let rsp: String = client.call(res).await.unwrap();
-                println!("Lisp response {:?}", rsp);
+                info!("Lisp response {:?}", rsp);
             }
             RemoteMethod::Disconnect { conn: _ } => {
                 let rsp: String = client.call(res).await.unwrap();
-                println!("Lisp response {:?}", rsp);
+                info!("Lisp response {:?}", rsp);
             }
             _ => {}
         }
@@ -148,7 +151,7 @@ async fn async_main(
         let mut muxer = linemux::MuxedLines::new().expect("Failed to initialize Muxer");
 
         if let Err(e) = muxer.add_file("frontend.log").await {
-            eprintln!("Log file doesn't exist: {}", e);
+            error!("Log file doesn't exist: {}", e);
             return;
         }
 
@@ -160,7 +163,16 @@ async fn async_main(
                     let _ = log_ui_handle.upgrade_in_event_loop(move |ui| {
                         let mut current = ui.get_log_text().to_string();
                         current.push_str(&log_line);
-                        ui.set_log_text(current.into());
+
+                        let lines_vec: Vec<&str> = current.lines().collect();
+                        let truncation = 500;
+                        if lines_vec.len() > truncation {
+                            let truncated = lines_vec[lines_vec.len() - truncation..].join("\n");
+                            ui.set_log_text((truncated + "\n").into());
+                        } else {
+                            ui.set_log_text(current.into());
+                        }
+
                         ui.invoke_log_go_to_bottom();
                     });
                 }
@@ -170,12 +182,23 @@ async fn async_main(
 
     tokio::join!(events_tid, cmds_tid, log_tid);
 
-    println!("Exiting..");
+    info!("Exiting..");
 
     Ok(())
 }
 
 fn main() {
+    let file = OpenOptions::new().append(true).create(true).open("frontend.log").unwrap();
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file);
+
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_max_level(Level::INFO)
+        .init();
+
+    info!("App startup");
+
     let ui = AppWindow::new().unwrap();
 
     let (tx_chan, rx_chan) = mpsc::channel(10);
@@ -183,7 +206,7 @@ fn main() {
     // Set up button commands
     let ui_handle = ui.as_weak();
     ui.on_button(move |id| {
-        println!("CALLBACK: {:?}", id);
+        info!("CALLBACK: {:?}", id);
         match id {
             Command::Connect => {
                 if let Some(address) = get_current_row(&ui_handle) {
@@ -196,7 +219,7 @@ fn main() {
                 tx_chan.blocking_send(cmd).unwrap();
             }
             _ => {
-                println!("UNHANDLED");
+                info!("UNHANDLED");
             }
         }
     });
@@ -254,8 +277,7 @@ fn main() {
 //   - [x] sort by rssi / name
 //   - [x] filter addr/name
 // - connect
-//   - [-] log view (gatt operations)
-//     - [ ] use proper logger and log to file
+//   - [x] log view (gatt operations)
 //   - [ ] gatt listview
 //   - [x] add/delete tab on connected/disconnected events
 //   - [ ] encrypt / bond management

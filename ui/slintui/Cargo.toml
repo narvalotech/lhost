@@ -16,6 +16,9 @@ slint = { version = "1.14.1", features = ["renderer-skia"] }
 tokio-util = "0.7.18"
 async-compat = "0.2.5"
 linemux = "0.3.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-appender = "0.2"
 
 [build-dependencies]
 slint-build = "1.14.1"
