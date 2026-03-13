@@ -62,6 +62,10 @@ export component AppWindow inherits Window {
     // Define the callback here so Rust can "see" it
     callback button(Command);
 
+    in-out property <string> log-text: "";
+    public function log-go-to-bottom() {
+        log-viewer.go-to-bottom();
+    }
     in-out property <[[StandardListViewItem]]> scan_results_storage;
     in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
     in-out property <int> selected_device <=> results.current-row;
@@ -157,10 +161,15 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                TextEdit {
+                log-viewer:= TextEdit {
                     min-height: 100px;
                     font-size: 12px;
-                    text: "this is a log line\n and another";
+                    read-only: true;
+                    wrap: word-wrap;
+                    text: root.log-text;
+                    function go-to-bottom() {
+                        self.viewport-y = min(0px, - self.viewport-height + self.visible-height);
+                    }
                 }
             }
         }

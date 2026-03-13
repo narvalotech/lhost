@@ -134,12 +134,41 @@ async fn async_main(
     ui_handle: slint::Weak<AppWindow>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let token = CancellationToken::new();
-    let cloned_token = token.clone();
 
-    let events_tid = task::spawn(backend_event_task(cloned_token, ui_handle));
-    let cmds_tid = task::spawn(backend_cmd_task(token, rx_chan));
+    let events_ui_handle = ui_handle.clone();
+    let events_token = token.clone();
+    let events_tid = task::spawn(backend_event_task(events_token, events_ui_handle));
 
-    tokio::join!(events_tid, cmds_tid);
+    let cmds_token = token.clone();
+    let cmds_tid = task::spawn(backend_cmd_task(cmds_token, rx_chan));
+
+    let log_ui_handle = ui_handle.clone();
+    let log_token = token.clone();
+    let log_tid = tokio::spawn(async move {
+        let mut muxer = linemux::MuxedLines::new().expect("Failed to initialize Muxer");
+
+        if let Err(e) = muxer.add_file("frontend.log").await {
+            eprintln!("Log file doesn't exist: {}", e);
+            return;
+        }
+
+        loop {
+            tokio::select! {
+                _ = log_token.cancelled() => break,
+                Ok(Some(line)) = muxer.next_line() => {
+                    let log_line = format!("{}\n", line.line());
+                    let _ = log_ui_handle.upgrade_in_event_loop(move |ui| {
+                        let mut current = ui.get_log_text().to_string();
+                        current.push_str(&log_line);
+                        ui.set_log_text(current.into());
+                        ui.invoke_log_go_to_bottom();
+                    });
+                }
+            }
+        }
+    });
+
+    tokio::join!(events_tid, cmds_tid, log_tid);
 
     println!("Exiting..");
 
@@ -225,7 +254,8 @@ fn main() {
 //   - [x] sort by rssi / name
 //   - [x] filter addr/name
 // - connect
-//   - [ ] log view (gatt operations)
+//   - [-] log view (gatt operations)
+//     - [ ] use proper logger and log to file
 //   - [ ] gatt listview
 //   - [x] add/delete tab on connected/disconnected events
 //   - [ ] encrypt / bond management
