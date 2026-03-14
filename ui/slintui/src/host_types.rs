@@ -18,18 +18,34 @@ pub struct AttOperation {
     data: Vec<u8>,
 }
 
-// TODO can json support rust enums?
-#[derive(Deserialize, Debug)]
-pub struct Attribute {
-    handle: u16,
-    att_type: u8,
-    uuid16: u16,
-    uuid128: u128,
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum AttType {
+    #[default] Invalid,
+    Service,
+    CharacteristicDeclaration,
+    CharacteristicValue,
+    CharacteristicDescriptor,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Default, Constructor, Clone, Debug)]
+pub struct Attribute {
+    pub handle: u16,
+    pub att_type: AttType,
+    pub uuid16: u16,
+    pub uuid128: u128,
+}
+
+#[derive(Serialize, Deserialize, Default, Constructor, Clone, Debug)]
 pub struct GattTable {
-    attributes: Vec<Attribute>,
+    pub attributes: Vec<Attribute>,
+}
+
+#[derive(Serialize, Deserialize, Constructor, Clone, Debug)]
+pub struct PeerDevice {
+    pub address: Address,
+    pub conn_handle: u16,
+    pub gatt: GattTable,
 }
 
 #[derive(Serialize, Deserialize, Constructor, Clone, Debug)]
@@ -75,6 +91,7 @@ pub enum RemoteEvent {
     ScanResult(ScanResult),
     ConnComplete(ConnComplete),
     Disconnected(Disconnected),
+    Discovered(PeerDevice),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

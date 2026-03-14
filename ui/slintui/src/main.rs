@@ -29,13 +29,42 @@ fn scan_result_to_row(device: &ScanResult) -> ModelRc<StandardListViewItem> {
     ModelRc::from(Rc::new(VecModel::from(row_data)))
 }
 
-fn ui_update_devices(devices: &Vec<DeviceData>, ui_handle: &slint::Weak<AppWindow>) {
+fn device_to_device_data(device: &PeerDevice) -> DeviceData { // wow what a bad name
+    let attributes = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
+
+    for att in device.gatt.attributes.clone() {
+        let handle = format!("{}", att.handle);
+        let attt = format!("{:?}", att.att_type);
+        let uuid = format!("{}", att.uuid16); // todo: make converter fn
+
+        attributes.push(
+            ModelRc::from(Rc::new(VecModel::from(
+            vec![
+                StandardListViewItem::from(SharedString::from(&handle)),
+                StandardListViewItem::from(SharedString::from(&attt)),
+                StandardListViewItem::from(SharedString::from(&uuid)),
+                StandardListViewItem::from(SharedString::from("")),
+            ]))));
+    }
+
+    DeviceData {
+        address: SharedString::from(format!("{}", device.address)),
+        conn: device.conn_handle as i32,
+        gatt: ModelRc::from(attributes),
+    }
+}
+
+fn ui_update_devices(devices: &Vec<PeerDevice>, ui_handle: &slint::Weak<AppWindow>) {
     let devs = devices.clone();
 
     ui_handle
         .upgrade_in_event_loop(move |ui| {
-            let device_list = Rc::new(VecModel::from(devs));
-            ui.set_all_devices(device_list.clone().into());
+            let device_list = ui.get_all_devices();
+            let the_model = device_list.as_any().downcast_ref::<VecModel<DeviceData>>().expect("Wrong type");
+            the_model.clear();
+            for dev in devs {
+                the_model.push(device_to_device_data(&dev));
+            }
         })
         .unwrap();
 }
@@ -75,12 +104,17 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
     None
 }
 
+// 1. get connected-evt -> build PeerDevice
+// 2. get discovered-evt -> build GattTable
+//   -> rebuild peerdevice tab w/ gatt & replace
+// 3. ...
+// 4. profit!
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
     info!("startin events");
 
-    let conns_: Box<Vec<DeviceData>> = Box::new(Vec::new());
+    let conns_: Box<Vec<PeerDevice>> = Box::new(Vec::new());
     let conns = Box::leak(conns_);
 
     while let Some(evt) = tokio::select! {
@@ -97,13 +131,20 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             }
             RemoteEvent::ConnComplete(res) => {
                 let a = res.address;
-                let c = DeviceData { address: a.to_string().into(), conn: res.conn_handle as i32, text: "hello".into() };
+                let c = PeerDevice::new(a, res.conn_handle, GattTable::default());
                 conns.push(c);
+                ui_update_devices(conns, &ui_handle);
+            }
+            RemoteEvent::Discovered(res) => {
+                // TODO: better way?
+                let conn = res.conn_handle;
+                let _ = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
+                conns.push(res);
                 ui_update_devices(conns, &ui_handle);
             }
             RemoteEvent::Disconnected(res) => {
                 let conn = res.conn_handle;
-                let _ = conns.extract_if(.., |c| c.conn as u16 == conn).collect::<Vec<_>>();
+                let _ = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
                 ui_update_devices(conns, &ui_handle);
             }
         }
@@ -165,7 +206,7 @@ async fn async_main(
                         current.push_str(&log_line);
 
                         let lines_vec: Vec<&str> = current.lines().collect();
-                        let truncation = 500;
+                        let truncation = 10; // textview in debug builds are sssloowwww
                         if lines_vec.len() > truncation {
                             let truncated = lines_vec[lines_vec.len() - truncation..].join("\n");
                             ui.set_log_text((truncated + "\n").into());
@@ -263,6 +304,9 @@ fn main() {
         ui.set_scan_results(ModelRc::from(Rc::new(sorted_model)));
     });
 
+    let all_devices = Rc::new(VecModel::<DeviceData>::default());
+    ui.set_all_devices(all_devices.clone().into());
+
     let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
     slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
@@ -278,9 +322,11 @@ fn main() {
 //   - [x] filter addr/name
 // - connect
 //   - [x] log view (gatt operations)
-//   - [ ] gatt listview
+//   - [x] gatt listview
+//     - later: use tree https://github.com/slint-ui/slint/discussions/1042
 //   - [x] add/delete tab on connected/disconnected events
 //   - [ ] encrypt / bond management
+//     - needs window menus
 // - gatt
 //   - [ ] discovery
 //   - [ ] read/write

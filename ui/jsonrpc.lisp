@@ -1,6 +1,10 @@
 (ql:quickload '(:jsonrpc :usocket :yason))
 (setf yason:*list-encoder* 'yason:encode-alist)
 
+(defun yap (input)
+  (with-output-to-string (os)
+    (yason:encode input os)))
+
 (ql:quickload :bordeaux-threads)
 (defparameter *server* (jsonrpc:make-server))
 ;; TODO: move to raw sockets
@@ -27,9 +31,9 @@
                     (cons "decoded" decoded)))))
 
 (defparameter *handle* #x0010)
-(defun make-conn-complete (address)
+(defun make-conn-complete (address conn)
   (list (cons "conn_complete"
-              (list (cons "conn_handle" (incf *handle*))
+              (list (cons "conn_handle" conn)
                     (cons "address"
                           (list (cons "address_type" (car address))
                                 (cons "address" (cadr address))))))))
@@ -40,7 +44,36 @@
     (list (cons "disconnected"
                 (list (cons "conn_handle" handle))))))
 
+(defun fake-type (i)
+  (let ((types '("service" "characteristic_declaration" "characteristic_value" "characteristic_descriptor")))
+    (nth (mod i (length types)) types)))
+
+(defun make-fake-gatt ()
+  (list
+   (cons
+    "attributes"
+    (coerce
+     (loop for i from 0 to 10 collect
+                              (list
+                               (cons "handle" i)
+                               (cons "att_type" (fake-type i))
+                               (cons "uuid16" (+ i #x2a28))
+                               (cons "uuid128" 0)))
+     'vector))))
+
+(yap (make-fake-gatt))
+
+(defun make-peer-device (address conn)
+  (list (cons "discovered"
+              (list
+               (cons "address"
+                     (list (cons "address_type" (car address))
+                           (cons "address" (cadr address))))
+               (cons "conn_handle" conn)
+               (cons "gatt" (make-fake-gatt))))))
+
 (defvar *send-connect* nil)
+(defvar *send-gatt* nil)
 (defvar *send-disconnect* nil)
 (defparameter *rssi* 0)
 (defun make-rssi ()
@@ -66,12 +99,19 @@
                 (let ((addr #x00aA7DDA7114))
                   (lambda (args)
                     (declare (ignore args))
-                    (sleep .1)
+                    (sleep 1)
                     (cond
                       (*send-connect*
                        (let ((address *send-connect*))
                          (setf *send-connect* nil)
-                         (make-conn-complete address)))
+                         (incf *handle*)
+                         (setf *send-gatt* (make-peer-device address *handle*))
+                         (make-conn-complete address *handle*)))
+
+                      (*send-gatt*
+                       (let ((gatt *send-gatt*))
+                         (setf *send-gatt* nil)
+                         gatt))
 
                       (*send-disconnect*
                        (progn

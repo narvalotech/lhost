@@ -35,18 +35,25 @@ component ScanResults inherits Rectangle {
 struct DeviceData {
     address: string,
     conn: int,
-    text: string,               // this will be a GATT view later
+    gatt: [[StandardListViewItem]],
 }
 
-component DeviceView inherits Rectangle {
+component GattView inherits Rectangle {
     in property <DeviceData> data;
-    background: #333;
-    border-width: 1px;
-    border-color: gray;
+    in-out property <int> current-row: tv.current-row;
 
-    Text {
-        text: "View: " + root.data.address + " | Value: " + root.data.text;
-        color: white;
+    min-width: 500px;
+    min-height: 200px;
+    VerticalLayout {
+        tv := StandardTableView {
+            columns: [
+                { title: "Handle" },
+                { title: "Type" },
+                { title: "UUID" },
+                { title: "Value" },
+            ];
+            rows: root.data.gatt;
+        }
     }
 }
 
@@ -154,7 +161,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        for device[i] in root.all-devices : DeviceView {
+                        for device[i] in root.all-devices : GattView {
                             data: device;
                             visible: (root.active-tab == i+1) && !scan-focused;
                         }
