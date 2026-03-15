@@ -1,0 +1,83 @@
+enum MenuId {
+    start-scan,
+    stop-scan,
+    clear-scan,
+    connect,
+    disconnect,
+    conn-param-update,
+    att-mtu,
+    bond,
+    delete-bonds,
+    stash-bonds,
+    unstash-bonds,
+    att-read,
+    att-write-cmd,
+    att-write-req,
+    att-read-own,
+    att-write-own,
+    att-notify
+}
+
+struct MenuItemDesc {
+    title: string,
+    id: MenuId,
+}
+
+struct LazyMenuItem {
+    title: string,
+    items: [MenuItemDesc],
+}
+
+export component Example inherits Window {
+    callback menu-action(MenuId);
+
+    property <[LazyMenuItem]> menus : [
+        {
+            title: "Connection",
+            items: [
+                {title: "Start scan", id: MenuId.start-scan},
+                {title: "Stop scan", id: MenuId.stop-scan},
+                {title: "Clear scan results", id: MenuId.clear-scan},
+                {title: "Connect", id: MenuId.connect},
+                {title: "Disconnect", id: MenuId.disconnect},
+                {title: "Update conn params", id: MenuId.conn-param-update},
+            ],
+        },
+        {
+            title: "Security",
+            items: [
+                {title: "Bond / re-encrypt", id: MenuId.bond},
+                {title: "Stash bonds", id: MenuId.stash-bonds},
+                {title: "Unstash bonds", id: MenuId.unstash-bonds},
+                {title: "Delete bonds", id: MenuId.delete-bonds},
+            ],
+        },
+        {
+            title: "GATT Client",
+            items: [
+                {title: "Read", id: MenuId.att-read},
+                {title: "Write (command)", id: MenuId.att-write-cmd},
+                {title: "Write (request)", id: MenuId.att-write-req},
+                {title: "Exchange MTU", id: MenuId.att-mtu},
+            ],
+        },
+        {
+            title: "GATT Server",
+            items: [
+                {title: "Notify", id: MenuId.att-notify},
+                {title: "Read own", id: MenuId.att-read-own},
+                {title: "Write own", id: MenuId.att-write-own},
+            ],
+        }
+    ];
+
+    MenuBar {
+        for menu in menus : Menu {
+            title: menu.title;
+            for item in menu.items: MenuItem {
+                title: item.title;
+                activated => { menu-action(item.id); }
+            }
+        }
+    }
+}

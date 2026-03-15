@@ -331,3 +331,5 @@ fn main() {
 //   - [ ] discovery
 //   - [ ] read/write
 //   - [ ] notify
+// - misc
+//   - [ ] keyboard shortcuts
