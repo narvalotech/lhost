@@ -96,12 +96,18 @@ pub enum RemoteEvent {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteCommand {
+    Connect { address: Address },
+    Disconnect { conn: u16 },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "method", content = "params")]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteMethod {
     GetEvent,
-    Connect { address: Address },
-    Disconnect { conn: u16 },
+    Command(RemoteCommand),
 }
 
 // ------ Impl ------

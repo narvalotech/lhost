@@ -150,10 +150,26 @@
                           (gethash "address_type" (gethash "address" args))
                           (gethash "address" (gethash "address" args)))))
 
-(jsonrpc:expose *server* "disconnect"
+(defun handle-cmd-connect (args)
+  (setf *send-connect*
+        (list (gethash "address_type" (gethash "address" args))
+              (gethash "address" (gethash "address" args))))
+  (format nil "Connected to (~X) ~X"
+          (gethash "address_type" (gethash "address" args))
+          (gethash "address" (gethash "address" args))))
+
+(defun handle-cmd-disconnect (args)
+  (setf *send-disconnect* (gethash "conn" args))
+  (format nil "Disconnected from ~X" *send-disconnect*)))
+
+(jsonrpc:expose *server* "command"
                 (lambda (args)
-                  (setf *send-disconnect* (gethash "conn" args))
-                  (format nil "Disconnected from ~X" *send-disconnect*)))
+                  (format t "args: ~A" args)
+                  (cond
+                    ((gethash "connect" args)
+                     (handle-cmd-connect (gethash "connect" args)))
+                    ((gethash "disconnect" args)
+                     (handle-cmd-disconnect (gethash "disconnect" args))))))
 
 (defparameter *events* nil)
 (defun get-events ()
@@ -164,16 +180,3 @@
                 (lambda (args)
                   (declare (ignore args))
                   (format nil "~A" (get-events))))
-
-;; Slint MVP:
-;; connect/disconnect to a device
-;;
-;; TODO:
-;; - cmd:
-;;   - scan/connect/disconnect
-;; - evt:
-;;   - scan results
-;;   - conn complete
-;; - state:
-;;   - list of scanned devices
-;;   - list of active connections

@@ -167,28 +167,27 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
     info!("quitting events");
 }
 
-async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteMethod>) {
+async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteCommand>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
     while let Some(res) = rx_chan.recv().await {
         info!("JRPC THREAD: {:?}", res);
         match res {
-            RemoteMethod::Connect { address: _ } => {
-                let rsp: String = client.call(res).await.unwrap();
+            RemoteCommand::Connect { address: _ } => {
+                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
-            RemoteMethod::Disconnect { conn: _ } => {
-                let rsp: String = client.call(res).await.unwrap();
+            RemoteCommand::Disconnect { conn: _ } => {
+                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
-            _ => {}
         }
     }
     cancel.cancel();
 }
 
 async fn async_main(
-    rx_chan: mpsc::Receiver<RemoteMethod>,
+    rx_chan: mpsc::Receiver<RemoteCommand>,
     ui_handle: slint::Weak<AppWindow>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let token = CancellationToken::new();
@@ -265,12 +264,12 @@ fn main() {
         match id {
             Command::Connect => {
                 if let Some(address) = get_current_row(&ui_handle) {
-                    let cmd = RemoteMethod::Connect { address };
+                    let cmd = RemoteCommand::Connect { address };
                     tx_chan.blocking_send(cmd).unwrap();
                 }
             }
             Command::Disconnect => {
-                let cmd = RemoteMethod::Disconnect { conn: 1 };
+                let cmd = RemoteCommand::Disconnect { conn: 1 };
                 tx_chan.blocking_send(cmd).unwrap();
             }
             _ => {
