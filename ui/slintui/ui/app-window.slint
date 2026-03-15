@@ -247,9 +247,8 @@ export component AppWindow inherits Window {
 
                 log-viewer:= TextEdit {
                     min-height: 100px;
-                    font-size: 12px;
                     read-only: true;
-                    wrap: word-wrap;
+                    wrap: no-wrap;
                     text: root.log-text;
                     function go-to-bottom() {
                         self.viewport-y = min(0px, - self.viewport-height + self.visible-height);
