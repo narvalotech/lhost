@@ -57,12 +57,40 @@ component GattView inherits Rectangle {
     }
 }
 
-export enum Command { start-scan, stop-scan, connect, bond, disconnect }
-
 export struct ScanFilter {
     text: string,
     column: int,
     ascending: bool,
+}
+
+export enum Command {
+    start-scan,
+    stop-scan,
+    clear-scan,
+    connect,
+    disconnect,
+    conn-param-update,
+    att-mtu,
+    bond,
+    delete-bonds,
+    stash-bonds,
+    unstash-bonds,
+    att-read,
+    att-write-cmd,
+    att-write-req,
+    att-read-own,
+    att-write-own,
+    att-notify
+}
+
+struct MenuItemDesc {
+    title: string,
+    id: Command,
+}
+
+struct LazyMenuItem {
+    title: string,
+    items: [MenuItemDesc],
 }
 
 export component AppWindow inherits Window {
@@ -81,6 +109,55 @@ export component AppWindow inherits Window {
     in-out property <ScanFilter> scan-filter: {text: "", column: 1, ascending: false};
 
     callback filter-scan-results(ScanFilter);
+    property <[LazyMenuItem]> menus : [
+        {
+            title: "Connection",
+            items: [
+                {title: "Start scan", id: Command.start-scan},
+                {title: "Stop scan", id: Command.stop-scan},
+                {title: "Clear scan results", id: Command.clear-scan},
+                {title: "Connect", id: Command.connect},
+                {title: "Disconnect", id: Command.disconnect},
+                {title: "Update conn params", id: Command.conn-param-update},
+            ],
+        },
+        {
+            title: "Security",
+            items: [
+                {title: "Bond / re-encrypt", id: Command.bond},
+                {title: "Stash bonds", id: Command.stash-bonds},
+                {title: "Unstash bonds", id: Command.unstash-bonds},
+                {title: "Delete bonds", id: Command.delete-bonds},
+            ],
+        },
+        {
+            title: "GATT Client",
+            items: [
+                {title: "Read", id: Command.att-read},
+                {title: "Write (command)", id: Command.att-write-cmd},
+                {title: "Write (request)", id: Command.att-write-req},
+                {title: "Exchange MTU", id: Command.att-mtu},
+            ],
+        },
+        {
+            title: "GATT Server",
+            items: [
+                {title: "Notify", id: Command.att-notify},
+                {title: "Read own", id: Command.att-read-own},
+                {title: "Write own", id: Command.att-write-own},
+            ],
+        }
+    ];
+
+    MenuBar {
+        for menu in menus : Menu {
+            title: menu.title;
+            for item in menu.items: MenuItem {
+                title: item.title;
+                activated => { button(item.id); }
+            }
+        }
+    }
 
     VerticalLayout {
         HorizontalLayout {
