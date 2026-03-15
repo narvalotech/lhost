@@ -33,9 +33,9 @@ fn device_to_device_data(device: &PeerDevice) -> DeviceData { // wow what a bad 
     let attributes = Rc::new(VecModel::<ModelRc<StandardListViewItem>>::default());
 
     for att in device.gatt.attributes.clone() {
-        let handle = format!("{}", att.handle);
+        let handle = format!("{:04X}", att.handle);
         let attt = format!("{:?}", att.att_type);
-        let uuid = format!("{}", att.uuid16); // todo: make converter fn
+        let uuid = format!("{:X}", att.uuid16); // todo: make converter fn
 
         attributes.push(
             ModelRc::from(Rc::new(VecModel::from(
@@ -65,6 +65,17 @@ fn ui_update_devices(devices: &Vec<PeerDevice>, ui_handle: &slint::Weak<AppWindo
             for dev in devs {
                 the_model.push(device_to_device_data(&dev));
             }
+        })
+        .unwrap();
+}
+
+fn ui_update_gatt_server(own_gatt: &PeerDevice, ui_handle: &slint::Weak<AppWindow>) {
+    let gatt = own_gatt.clone();
+
+    ui_handle
+        .upgrade_in_event_loop(move |ui| {
+            let gatt_server = ui.get_gatt_server();
+            ui.set_gatt_server(device_to_device_data(&gatt));
         })
         .unwrap();
 }
@@ -141,6 +152,9 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
                 let _ = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
                 conns.push(res);
                 ui_update_devices(conns, &ui_handle);
+            }
+            RemoteEvent::ServerDiscovered(res) => {
+                ui_update_gatt_server(&res, &ui_handle);
             }
             RemoteEvent::Disconnected(res) => {
                 let conn = res.conn_handle;
@@ -307,6 +321,9 @@ fn main() {
     let all_devices = Rc::new(VecModel::<DeviceData>::default());
     ui.set_all_devices(all_devices.clone().into());
 
+    let gatt_server = DeviceData::default();
+    ui.set_gatt_server(gatt_server);
+
     let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
     slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
@@ -328,8 +345,10 @@ fn main() {
 //   - [ ] encrypt / bond management
 //     - needs window menus
 // - gatt
+//   - [x] show own table
 //   - [ ] discovery
 //   - [ ] read/write
 //   - [ ] notify
 // - misc
+//   - [ ] real jsonrpc server
 //   - [ ] keyboard shortcuts

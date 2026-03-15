@@ -63,6 +63,15 @@
 
 (yap (make-fake-gatt))
 
+(defun make-server-discovered ()
+  (list (cons "server_discovered"
+              (list
+               (cons "address"
+                     (list (cons "address_type" 0)
+                           (cons "address" 0)))
+               (cons "conn_handle" #xFFFF)
+               (cons "gatt" (make-fake-gatt))))))
+
 (defun make-peer-device (address conn)
   (list (cons "discovered"
               (list
@@ -94,6 +103,8 @@
           (nth (random (length *n2*)) *n2*)))
 (make-name)
 
+(defparameter *send-own-gatt* nil)
+
 ;; Example: Returning a complex 'UserProfile' struct to Rust
 (jsonrpc:expose *server* "get_event"
                 (let ((addr #x00aA7DDA7114))
@@ -110,8 +121,14 @@
 
                       (*send-gatt*
                        (let ((gatt *send-gatt*))
+                         (setf *send-own-gatt* t)
                          (setf *send-gatt* nil)
                          gatt))
+
+                      (*send-own-gatt*
+                       (progn
+                         (setf *send-own-gatt* nil)
+                         (make-server-discovered)))
 
                       (*send-disconnect*
                        (progn

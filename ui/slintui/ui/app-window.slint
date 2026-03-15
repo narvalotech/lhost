@@ -103,6 +103,8 @@ export component AppWindow inherits Window {
     }
     in-out property <[[StandardListViewItem]]> scan_results_storage;
     in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
+
+    in-out property <DeviceData> gatt_server <=> gatt-server.data;
     in-out property <int> selected_device <=> results.current-row;
     in-out property <[DeviceData]> all-devices: [];
     in-out property <int> active-tab: 0;
@@ -185,19 +187,31 @@ export component AppWindow inherits Window {
                 padding: 10px;
                 spacing: 10px;
                 property<bool> scan-focused: true;
+                property<bool> gatt-server-focused: false;
 
                 VerticalBox {
                     padding: 0px;
                     HorizontalBox {
                         padding: 0px;
                         Button {
+                            text: "GATT server";
+                            clicked => {
+                                scan-focused = false;
+                                gatt-server-focused = true;
+                            }
+                        }
+
+                        Button {
                             text: "Scan results";
-                            clicked => { scan-focused = true; }
+                            clicked => {
+                                scan-focused = true;
+                                gatt-server-focused = false;
+                            }
                         }
 
                         for device[i] in root.all-devices : Button {
                             text: device.address;
-                            clicked => { root.active-tab = i+1; scan-focused = false; }
+                            clicked => { root.active-tab = i+1; scan-focused = false; gatt-server-focused = false; }
                         }
                     }
 
@@ -227,9 +241,13 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        gatt-server := GattView {
+                            visible: gatt-server-focused;
+                        }
+
                         for device[i] in root.all-devices : GattView {
                             data: device;
-                            visible: (root.active-tab == i+1) && !scan-focused;
+                            visible: (root.active-tab == i+1) && !scan-focused && !gatt-server-focused;
                         }
                     }
                 }

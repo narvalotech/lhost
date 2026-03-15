@@ -92,6 +92,7 @@ pub enum RemoteEvent {
     ConnComplete(ConnComplete),
     Disconnected(Disconnected),
     Discovered(PeerDevice),
+    ServerDiscovered(PeerDevice),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
