@@ -173,6 +173,18 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
     while let Some(res) = rx_chan.recv().await {
         info!("JRPC THREAD: {:?}", res);
         match res {
+            RemoteCommand::StartScan => {
+                let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
+                info!("Lisp response {:?}", rsp);
+                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
+                info!("Lisp response {:?}", rsp);
+            }
+            RemoteCommand::StopScan => {
+                let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
+                info!("Lisp response {:?}", rsp);
+                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
+                info!("Lisp response {:?}", rsp);
+            }
             RemoteCommand::Connect { address: _ } => {
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
@@ -181,6 +193,7 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
+            _ => {}
         }
     }
     cancel.cancel();
@@ -262,6 +275,14 @@ fn main() {
     ui.on_button(move |id| {
         info!("CALLBACK: {:?}", id);
         match id {
+            Command::StartScan => {
+                let cmd = RemoteCommand::StartScan;
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            Command::StopScan => {
+                let cmd = RemoteCommand::StopScan;
+                tx_chan.blocking_send(cmd).unwrap();
+            }
             Command::Connect => {
                 if let Some(address) = get_current_row(&ui_handle) {
                     let cmd = RemoteCommand::Connect { address };
@@ -349,5 +370,5 @@ fn main() {
 //   - [ ] read/write
 //   - [ ] notify
 // - misc
-//   - [ ] real jsonrpc server
+//   - [x] real jsonrpc server
 //   - [ ] keyboard shortcuts

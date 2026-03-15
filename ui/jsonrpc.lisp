@@ -1,5 +1,7 @@
+;; eval utils.lisp before
 (ql:quickload '(:jsonrpc :usocket :yason))
 (setf yason:*list-encoder* 'yason:encode-alist)
+(setf yason:*parse-object-as* :alist)
 
 (defun yap (input)
   (with-output-to-string (os)
@@ -13,13 +15,6 @@
    (jsonrpc:server-listen *server* :port 55000 :mode :tcp))
  :name "JRPC server")
 
-;; Define a simple method
-(jsonrpc:expose *server* "echo"
-                (lambda (args)
-                  (format t "Lisp received: ~A~%" (gethash "message" args))
-                  (format nil "Lisp received: ~A~%" (gethash "message" args))
-                  ))
-
 (defun make-scan-result (address rssi name data &optional (decoded ""))
   (list (cons "scan_result"
               (list (cons "address"
@@ -28,9 +23,8 @@
                     (cons "rssi" rssi)
                     (cons "name" name)
                     (cons "data" data)
-                    (cons "decoded" decoded)))))
+                    (cons "decoded" (format nil "~X" decoded))))))
 
-(defparameter *handle* #x0010)
 (defun make-conn-complete (address conn)
   (list (cons "conn_complete"
               (list (cons "conn_handle" conn)
@@ -38,145 +32,107 @@
                           (list (cons "address_type" (car address))
                                 (cons "address" (cadr address))))))))
 
-(defun make-disconnected ()
-  (let ((handle *handle*))
-    (decf *handle*)
-    (list (cons "disconnected"
-                (list (cons "conn_handle" handle))))))
+(defun make-disconnected (handle)
+  (list (cons "disconnected"
+              (list (cons "conn_handle" handle)))))
 
-(defun fake-type (i)
-  (let ((types '("service" "characteristic_declaration" "characteristic_value" "characteristic_descriptor")))
-    (nth (mod i (length types)) types)))
+(defparameter *cmds* (make-mailbox "ui backend -> host"))
+(defparameter *evts* (make-mailbox "ui backend <- host"))
+(defvar backend-thread nil)
 
-(defun make-fake-gatt ()
-  (list
-   (cons
-    "attributes"
-    (coerce
-     (loop for i from 0 to 10 collect
-                              (list
-                               (cons "handle" i)
-                               (cons "att_type" (fake-type i))
-                               (cons "uuid16" (+ i #x2a28))
-                               (cons "uuid128" 0)))
-     'vector))))
+(defun handle-cmd (cmd &optional args)
+  (case cmd
+    (:open
+     (progn
+       (setf backend-thread (start-backend *evts*))
+       (dispatch-cmd :init)))
+    (:close
+     (progn
+       (stop-backend backend-thread)
+       (setf backend-thread nil)))
 
-(yap (make-fake-gatt))
+    (:start-scan
+     (dispatch-cmd :start-scan))
+    (:stop-scan
+     (dispatch-cmd :stop-scan))
 
-(defun make-server-discovered ()
-  (list (cons "server_discovered"
-              (list
-               (cons "address"
-                     (list (cons "address_type" 0)
-                           (cons "address" 0)))
-               (cons "conn_handle" #xFFFF)
-               (cons "gatt" (make-fake-gatt))))))
-
-(defun make-peer-device (address conn)
-  (list (cons "discovered"
-              (list
-               (cons "address"
-                     (list (cons "address_type" (car address))
-                           (cons "address" (cadr address))))
-               (cons "conn_handle" conn)
-               (cons "gatt" (make-fake-gatt))))))
-
-(defvar *send-connect* nil)
-(defvar *send-gatt* nil)
-(defvar *send-disconnect* nil)
-(defparameter *rssi* 0)
-(defun make-rssi ()
-  (- (random 100)))
-(defparameter *n1*
-  '("zealous"
-    "big"
-    "small"
-    "fuzzy"))
-(defparameter *n2*
-  '("meerkat"
-    "automobile"
-    "thing"
-    "ball"))
-(defun make-name ()
-  (format nil "~A-~A"
-          (nth (random (length *n1*)) *n1*)
-          (nth (random (length *n2*)) *n2*)))
-(make-name)
-
-(defparameter *send-own-gatt* nil)
-
-;; Example: Returning a complex 'UserProfile' struct to Rust
-(jsonrpc:expose *server* "get_event"
-                (let ((addr #x00aA7DDA7114))
-                  (lambda (args)
-                    (declare (ignore args))
-                    (sleep 1)
-                    (cond
-                      (*send-connect*
-                       (let ((address *send-connect*))
-                         (setf *send-connect* nil)
-                         (incf *handle*)
-                         (setf *send-gatt* (make-peer-device address *handle*))
-                         (make-conn-complete address *handle*)))
-
-                      (*send-gatt*
-                       (let ((gatt *send-gatt*))
-                         (setf *send-own-gatt* t)
-                         (setf *send-gatt* nil)
-                         gatt))
-
-                      (*send-own-gatt*
-                       (progn
-                         (setf *send-own-gatt* nil)
-                         (make-server-discovered)))
-
-                      (*send-disconnect*
-                       (progn
-                         (setf *send-disconnect* nil)
-                         (make-disconnected)))
-
-                      (t
-                       (make-scan-result
-                        (list 1 (incf addr))
-                        (make-rssi) (make-name)
-                        #(1 2 3 4 5) "my-adv-data"))))))
-
-(jsonrpc:expose *server* "connect"
-                (lambda (args)
-                  (setf *send-connect*
-                        (list (gethash "address_type" (gethash "address" args))
-                              (gethash "address" (gethash "address" args))))
-                  (format nil "Connected to (~X) ~X"
-                          (gethash "address_type" (gethash "address" args))
-                          (gethash "address" (gethash "address" args)))))
-
-(defun handle-cmd-connect (args)
-  (setf *send-connect*
-        (list (gethash "address_type" (gethash "address" args))
-              (gethash "address" (gethash "address" args))))
-  (format nil "Connected to (~X) ~X"
-          (gethash "address_type" (gethash "address" args))
-          (gethash "address" (gethash "address" args))))
-
-(defun handle-cmd-disconnect (args)
-  (setf *send-disconnect* (gethash "conn" args))
-  (format nil "Disconnected from ~X" *send-disconnect*)))
+    (:connect
+     (let ((address
+             (make-address (gethash "address" (gethash "address" args))
+                           (gethash "address_type" (gethash "address" args)))))
+       (dispatch-cmd :connect address)))
+    (:disconnect
+     (dispatch-cmd :disconnect (gethash "conn" args)))
+  )
+  (format nil "execute: ~A" cmd))
 
 (jsonrpc:expose *server* "command"
                 (lambda (args)
-                  (format t "args: ~A" args)
+                  (format t "args: ~A~%" args)
                   (cond
-                    ((gethash "connect" args)
-                     (handle-cmd-connect (gethash "connect" args)))
-                    ((gethash "disconnect" args)
-                     (handle-cmd-disconnect (gethash "disconnect" args))))))
+                    ((string= "open" args)
+                     (handle-cmd :open))
+                    ((string= "close" args)
+                     (handle-cmd :close))
 
-(defparameter *events* nil)
-(defun get-events ()
-  (when *events*
-    (pop *events*)))
+                    ((string= "start_scan" args)
+                     (handle-cmd :start-scan))
+                    ((string= "stop_scan" args)
+                     (handle-cmd :stop-scan))
 
-(jsonrpc:expose *server* "get_events"
+                    ;; ((gethash "connect" args)
+                    ;;  (handle-cmd :connect (gethash "connect" args)))
+                    ;; ((gethash "disconnect" args)
+                    ;;  (handle-cmd :disconnect (gethash "disconnect" args)))
+
+                    )))
+
+(defun evt->json (evt)
+  (log-dbg "UI-EVT: ~A" evt)
+  (case (if (listp evt) (car evt) evt)
+    (:evt
+     (case (car (cadr evt))
+       (:le-scan-report
+        (destructuring-bind
+            (&key address-type address timestamp rssi data)
+            (decode-scan-report (cadr evt))
+          (make-scan-result
+           (list address-type address)
+           rssi
+           (extract-name (parse-ad data))
+           (coerce data 'vector)
+           (parse-ad data))))
+
+       (:le-enh-conn-complete
+        (let* ((data (cadr (cadr evt)))
+               (conn-handle (getf data :handle))
+               (address-with-type (make-address
+                                   (decode-c-int (getf data :peer-address) :u64)
+                                   (getf data :peer-address-type)))
+               (address (getf address-with-type :address)))
+
+          (make-conn-complete
+           (list
+            (getf address-with-type :type)
+            (getf address-with-type :address))
+           conn-handle)))
+
+       (:disconnection-complete
+        (destructuring-bind
+            (&key status handle reason)
+            (cadr evt)
+          (make-disconnected
+           handle)))
+
+       (:otherwise
+        (progn
+          (log-inf "EVENT: ~X" evt)
+          "unknown-event"))
+       ))))
+
+(jsonrpc:expose *server* "get_event"
+                ;; Only one concurrent client supported
                 (lambda (args)
                   (declare (ignore args))
-                  (format nil "~A" (get-events))))
+                  (let ((evt (sb-concurrency:receive-message *evts*)))
+                    (evt->json evt))))

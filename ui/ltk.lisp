@@ -1,4 +1,4 @@
-;; eval host.lisp before
+;; eval utils.lisp before
 (ql:quickload "nodgui")
 ;; (nodgui.demo:demo)
 (setf nodgui:*default-theme* "default")
