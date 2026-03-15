@@ -109,6 +109,15 @@ export component AppWindow inherits Window {
     in-out property <ScanFilter> scan-filter: {text: "", column: 1, ascending: false};
 
     callback filter-scan-results(ScanFilter);
+
+    property <[MenuItemDesc]> buttons : [
+        {title: "Start scan", id: Command.start-scan},
+        {title: "Stop scan", id: Command.stop-scan},
+        {title: "Connect", id: Command.connect},
+        {title: "Bond", id: Command.bond},
+        {title: "Disconnect", id: Command.disconnect},
+    ];
+
     property <[LazyMenuItem]> menus : [
         {
             title: "Connection",
@@ -166,29 +175,9 @@ export component AppWindow inherits Window {
                 padding: 10px;
                 spacing: 10px;
                 max-width: 100px;
-                Button {
-                    text: "Start scan";
-                    clicked => {root.button(Command.start-scan);}
-                }
-
-                Button {
-                    text: "Stop scan";
-                    clicked => {root.button(Command.stop-scan);}
-                }
-
-                Button {
-                    text: "Connect";
-                    clicked => {root.button(Command.connect);}
-                }
-
-                Button {
-                    text: "Bond";
-                    clicked => {root.button(Command.bond);}
-                }
-
-                Button {
-                    text: "Disconnect";
-                    clicked => {root.button(Command.disconnect);}
+                for button in buttons : Button {
+                    text: button.title;
+                    clicked => {root.button(button.id);};
                 }
             }
 
