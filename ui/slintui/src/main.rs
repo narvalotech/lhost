@@ -170,18 +170,18 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
 async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteCommand>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
+    info!("Spawning server");
+    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
+    info!("Lisp response {:?}", rsp);
+
     while let Some(res) = rx_chan.recv().await {
         info!("JRPC THREAD: {:?}", res);
         match res {
             RemoteCommand::StartScan => {
-                let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
             RemoteCommand::StopScan => {
-                let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
@@ -196,6 +196,11 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
             _ => {}
         }
     }
+
+    info!("Killing server..");
+    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
+    info!("Lisp response {:?}", rsp);
+
     cancel.cancel();
 }
 
