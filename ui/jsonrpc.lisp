@@ -1,7 +1,6 @@
 ;; eval utils.lisp before
 (ql:quickload '(:jsonrpc :usocket :yason))
 (setf yason:*list-encoder* 'yason:encode-alist)
-(setf yason:*parse-object-as* :alist)
 
 (defun yap (input)
   (with-output-to-string (os)
@@ -44,6 +43,8 @@
   (case cmd
     (:open
      (progn
+       (stop-backend nil)
+       (sleep .1)
        (setf backend-thread (start-backend *evts*))
        (dispatch-cmd :init)))
     (:close
@@ -69,23 +70,23 @@
 (jsonrpc:expose *server* "command"
                 (lambda (args)
                   (format t "args: ~A~%" args)
-                  (cond
-                    ((string= "open" args)
-                     (handle-cmd :open))
-                    ((string= "close" args)
-                     (handle-cmd :close))
+                  (if (stringp args)
+                      (cond
+                        ((string= "open" args)
+                         (handle-cmd :open))
+                        ((string= "close" args)
+                         (handle-cmd :close))
 
-                    ((string= "start_scan" args)
-                     (handle-cmd :start-scan))
-                    ((string= "stop_scan" args)
-                     (handle-cmd :stop-scan))
-
-                    ;; ((gethash "connect" args)
-                    ;;  (handle-cmd :connect (gethash "connect" args)))
-                    ;; ((gethash "disconnect" args)
-                    ;;  (handle-cmd :disconnect (gethash "disconnect" args)))
-
-                    )))
+                        ((string= "start_scan" args)
+                         (handle-cmd :start-scan))
+                        ((string= "stop_scan" args)
+                         (handle-cmd :stop-scan)))
+                      (cond
+                        ((gethash "connect" args)
+                         (handle-cmd :connect (gethash "connect" args)))
+                        ((gethash "disconnect" args)
+                         (handle-cmd :disconnect (gethash "disconnect" args)))
+                        ))))
 
 (defun evt->json (evt)
   (log-dbg "UI-EVT: ~A" evt)
