@@ -812,7 +812,11 @@
 
 (defun receive-rxq (hci &optional predicate)
   (if (not predicate)
-      (pop (getf hci :rxq))
+      (let ((packet (car (last (getf hci :rxq)))))
+        (when packet
+          (setf (getf hci :rxq)
+                (butlast (getf hci :rxq)))
+          packet))
       (let ((packet (find-if predicate (getf hci :rxq))))
         (when packet
           (setf (getf hci :rxq)
