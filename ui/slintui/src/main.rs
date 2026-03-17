@@ -362,6 +362,8 @@ fn main() {
 //   - [ ] display merged AD
 //   - [x] sort by rssi / name
 //   - [x] filter addr/name
+//   - [ ] deduplicate (in jrpc)
+//     - similar pattern as ltk
 // - connect
 //   - [x] log view (gatt operations)
 //   - [x] gatt listview
