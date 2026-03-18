@@ -750,7 +750,7 @@
                         (nodgui.mw:text-input-dialog
                          content "Handle" "GATT Notify handle (hex)"
                          :text previous-gatt-notify-handle))
-                      (parsed-handle (decode-c-int (fromhexstream handle 2) :u16))
+                      (parsed-handle (decode-c-int (reverse (fromhexstream handle 2)) :u16))
                       (data
                         (nodgui.mw:text-input-dialog
                          content "GATT Notify Data" "GATT Notify Data (e,g, 01 ef 32 c1)"
