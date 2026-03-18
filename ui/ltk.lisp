@@ -263,7 +263,8 @@
     (let ((packet (receive-rxq hci)))
       (queue ui-events packet)
       (if packet
-          (process-hci hci (copy-tree packet))
+          (ignore-errors
+           (process-hci hci (copy-tree packet)))
           (return-from do-rx-work nil)))))
 
 (defun encode-address (address)
