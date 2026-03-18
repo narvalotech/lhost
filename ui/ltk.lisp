@@ -264,6 +264,26 @@
    (subseq (make-c-int :u64 (getf address :address)) 0 6)
    :type (getf address :type)))
 
+(defun save-hash-table (table filename)
+  (with-open-file (out filename
+                       :direction :output
+                       :if-exists :supersede)
+    ;; Store the test type so we can recreate it correctly
+    (print (hash-table-test table) out)
+    ;; Store the data as an alist
+    (let ((alist '()))
+      (maphash (lambda (k v) (push (cons k v) alist)) table)
+      (print alist out))))
+
+(defun load-hash-table (filename)
+  (with-open-file (in filename)
+    (let* ((test (read in))
+           (alist (read in))
+           (table (make-hash-table :test test)))
+      (dolist (pair alist)
+        (setf (gethash (car pair) table) (cdr pair)))
+      table)))
+
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
   (list
@@ -319,10 +339,31 @@
                          peer-address)))
                 (:bond
                  (let ((conn-handle (nth 1 cmd)))
-                   (log-inf "BOND")
-                   (start-security hci conn-handle)))
-                (:stash-bonds
+                   (log-inf "BOND (re-encrypt w/ LTK: ~X)"
+                            (start-security hci conn-handle t))
+                   ))
+                (:load-bonds
+                 (let ((bond-filename (nth 1 cmd)))
+                   (log-inf "LOAD BONDS (path: ~A)" bond-filename)
+                   (ignore-errors
+                    (setf *bonds* (load-hash-table bond-filename))
+                    (log-inf "load ok"))
+                   ))
+                (:store-bonds
+                 (unless bonds-stash    ; do not overwrite real bonds with temp
+                   (let ((bond-filename (nth 1 cmd)))
+                     (log-inf "STORE BONDS (path: ~A)" bond-filename)
+                     (ignore-errors
+                      (save-hash-table *bonds* bond-filename)
+                      (log-inf "store ok"))
+                     )))
+                (:clear-bonds
                  (progn
+                   (log-inf "CLEAR BONDS")
+                   (setf bonds-stash nil)
+                   (setf *bonds* (make-hash-table))))
+                (:stash-bonds
+                 (unless bonds-stash
                    (log-inf "STASH BONDS")
                    (setf bonds-stash *bonds*)
                    (setf *bonds* (make-hash-table))))
@@ -448,6 +489,7 @@
          (sort-scan-by :rssi)
          (filter-scan-name "")
          (last-scan-display (get-internal-real-time))
+         (bond-filename "bonds.txt")
          )
 
     ;; Register quit action
@@ -482,6 +524,8 @@
                      (lambda () (queue ui-events :stop-scan)))
         (make-button command-frame "Connect"
                      (lambda () (queue ui-events :connect)))
+        (make-button command-frame "Bond"
+                     (lambda () (queue ui-events :bond)))
         (make-button command-frame "Disconnect"
                      (lambda () (queue ui-events :disconnect)))
         (make-button command-frame "Advertise"
@@ -553,6 +597,7 @@
     (make-menuitem connection-menu "Encrypt (no bonding)" ui-events :encrypt "<e>" :disabled)
     (make-menuitem connection-menu "Stash bonds" ui-events :stash-bonds "<Control-b>")
     (make-menuitem connection-menu "Unstash bonds" ui-events :unstash-bonds "<Control-B>")
+    (make-menuitem connection-menu "Delete bonds" ui-events :clear-bonds "<Control-x>")
 
     ;; GATT client
     (make-menuitem att-menu "Read" ui-events :att-read "<r>" :disabled)
@@ -575,6 +620,8 @@
     ;; Print out GATT table
     ;; TODO: make a proper pane for this
     (log-inf "GATT TABLE: ~A" (gattc-print *gatts-table*))
+
+    (dispatch-cmd :load-bonds bond-filename)
 
     ;; Poll for events
     (loop while
@@ -622,6 +669,15 @@
                 (let ((handle (getf (gethash (decode-mac name) connections) :handle)))
                   (log-inf "Bonding ~a" name)
                   (dispatch-cmd :bond handle))))
+             t))
+
+          (:clear-bonds
+           (progn
+             (log-inf "Backing up bonds")
+             (dispatch-cmd :store-bonds (format nil "~A.bak" bond-filename))
+             (log-inf "Deleting active bonds")
+             (dispatch-cmd :clear-bonds bond-filename)
+             (dispatch-cmd :store-bonds bond-filename)
              t))
 
           (:stash-bonds
@@ -745,6 +801,7 @@
 
                   ;; TODO: ui element showing we're bonded
                   (log-inf "[~X] BONDED OK" (handle->address conn-handle connections))
+                  (dispatch-cmd :store-bonds bond-filename)
                   ))
 
                (:otherwise
