@@ -367,6 +367,11 @@
      (:status :u8
       :conn-handle :u16))
 
+    :le-ltk-request-neg-reply
+    (#x201b (:handle :u16)
+     (:status :u8
+      :conn-handle :u16))
+
     :le-remote-conn-param-req-neg-reply
     (#x2021 (:handle :u16
              :reason :u8)
@@ -2893,14 +2898,20 @@
   (setf (getf (get-smp-context conn) :encrypted) t))
 
 (defun provide-ltk (hci conn ltk)
-  (unless ltk
-    (error "cant find LTK"))
-  (log-dbg (format nil "ENCRYPTION: providing LTK ~X" ltk))
-  (hci-send-cmd
-   hci
-   (make-hci-cmd :le-ltk-request-reply
-                 :handle conn
-                 :ltk ltk)))
+  (if ltk
+      (progn
+        (log-dbg (format nil "ENCRYPTION: providing LTK ~X" ltk))
+        (hci-send-cmd
+         hci
+         (make-hci-cmd :le-ltk-request-reply
+                       :handle conn
+                       :ltk ltk)))
+      (progn
+        (log-dbg (format nil "ENCRYPTION: NO LTK"))
+        (hci-send-cmd
+         hci
+         (make-hci-cmd :le-ltk-request-neg-reply
+                       :handle conn)))))
 
 (defun bond-address (bond)
   (getf
@@ -3014,7 +3025,8 @@
                    :handle conn
                    :rand 0
                    :ediv 0
-                   :ltk ltk))))
+                   :ltk ltk))
+    ltk))
 
 (defconstant +l2cap-le-signalling-chan+ #x0005)
 (defconstant +l2cap-conn-param-update-req+ #x12)
