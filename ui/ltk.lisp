@@ -306,6 +306,17 @@
                  (log-inf "INIT CONTROLLER")
                  (init-controller hci))
 
+                (:start-adv
+                 (progn
+                   (start-advertising hci (list
+                                           (make-ad :flags '(#x01)) ; LE General discoverable
+                                           (make-ad :class-uuid-16-incomplete
+                                                    (make-c-int :u16 +gatt-uuid-heart-rate-service+))
+                                           (make-ad-name "HRM 600 (evil)")))
+                   (log-inf "START ADV OK")))
+                (:stop-adv
+                 (hci-set-adv-enable nil hci))
+
                 (:start-scan
                  (progn
                    (log-inf "START SCAN")
@@ -736,8 +747,13 @@
                    (dispatch-cmd :att-notify conn-handle parsed-handle parsed-data))))
              t))
 
-          (:start-adv t)
-          (:stop-adv t)
+          (:start-adv
+           (progn
+             (dispatch-cmd :start-adv)
+             t))
+          (:stop-adv (progn
+             (dispatch-cmd :stop-adv)
+             t))
           (:quit
            (progn
              ;; TODO: rename this. confusing.
