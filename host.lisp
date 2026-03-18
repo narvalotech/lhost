@@ -15,7 +15,8 @@
     :err (1 "ERRR")
     ))
 
-(defparameter *current-log-level* :tra)
+;; (defparameter *current-log-level* :inf)
+(defparameter *current-log-level* :dbg)
 (defparameter *log-time* nil)
 (defparameter *log-lock* (bt:make-lock "logs"))
 (defparameter *log-line-sink*
