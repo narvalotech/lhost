@@ -397,6 +397,7 @@
                 (:discover-gatt
                  (let* ((conn-handle (nth 1 cmd))
                         (gattc-table (gattc-discover hci conn-handle)))
+                   (att-set-mtu hci conn-handle 300)
                    (queue ui-events (list :gatt-discovery-end
                                           conn-handle
                                           gattc-table))))
@@ -611,7 +612,7 @@
     ;; In-connection menu
     (make-menuitem connection-menu "Disconnect" ui-events :disconnect "<d>")
     (make-menuitem connection-menu "Update connection params" ui-events :update-conn-params "<u>" :disabled)
-    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<m>" :disabled)
+    (make-menuitem connection-menu "Exchange MTU" ui-events :exchange-mtu "<m>")
 
     ;; Security
     (make-menuitem connection-menu "Bond" ui-events :bond "<b>")
