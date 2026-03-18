@@ -113,17 +113,25 @@
 (defun sort-scan (by devices)
   (sort devices
         (case by
-          (:recent (lambda (a b) (< (getf a :timestamp) (getf b :timestamp))))
+          (:mac (lambda (a b)
+                    (string-greaterp (print-addr (getf a :address))
+                                     (print-addr (getf b :address)))))
           (:rssi (lambda (a b) (> (getf a :rssi) (getf b :rssi))))
-          (:name (lambda (a b) (string-lessp (getf a :name) (getf b :name))))
+          (:name (lambda (a b)
+                    (string-greaterp (getf a :name) (getf b :name))))
           (otherwise (lambda (a b) (string-lessp (getf a :name) (getf b :name)))))))
+
+(defun mac? (addr-string)
+  (decode-mac addr-string))
 
 (defun filter-scan (name-filter devices)
   (if (zerop (length name-filter))
       devices
       (remove-if-not (lambda (device)
                        ;; Case-insensitive search
-                       (search name-filter (getf device :name) :test #'equalp))
+                       (if (mac? name-filter)
+                           (= (decode-mac name-filter) (getf device :address))
+                           (search name-filter (getf device :name) :test #'equalp)))
                      devices)))
 
 (defun log-to-widget (textview line)
@@ -553,7 +561,7 @@
 
       (ng:treeview-heading treeview ng:+treeview-first-column-id+
                            :text "MAC"
-                           :command (lambda () (sort-column :recent)))
+                           :command (lambda () (sort-column :mac)))
       (ng:treeview-heading treeview "rssi"
                            :command (lambda () (sort-column :rssi)))
       (ng:treeview-heading treeview "name"
@@ -595,6 +603,7 @@
     ;; Scan menu
     (make-menuitem scan-menu "Scan" ui-events :start-scan "<s>")
     (make-menuitem scan-menu "Stop scan" ui-events :stop-scan "<S>")
+    (make-menuitem scan-menu "Clear device list" ui-events :clear-scan "<Control-s>")
     (make-menuitem scan-menu "Set scan name filter" ui-events :filter-scan "<f>")
     (make-menuitem scan-menu "Connect" ui-events :connect "<c>")
 
@@ -640,6 +649,11 @@
         (unless (listp evt)
           (log-dbg "UI-EVT: ~A" evt))
         (case (if (listp evt) (car evt) evt)
+          (:clear-scan
+           (progn
+             (setf scanned-devices (make-hash-table))
+             (queue ui-events :display-scanned-devices)
+             t))
           (:start-scan
            (dispatch-cmd evt))
           (:stop-scan
