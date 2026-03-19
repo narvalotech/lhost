@@ -133,11 +133,16 @@
 
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
+
+  ;; Empty events mailbox
+  (loop until (sb-concurrency:mailbox-empty-p ui-events))
+
   (list
    (start-hci
     (getf *controller* :tx-mailbox)
     (getf *controller* :rx-mailbox)
     (getf *controller* :stop-signal))
+
    (bt:make-thread
     (lambda ()
       (let ((hci *controller*)
@@ -224,10 +229,11 @@
             ))))
     :name "Host interface")))
 
-(defun stop-backend (backend-thread)
+(defun stop-backend (backend-thread &optional send-quit-cmd)
   (ignore-errors
    (when backend-thread
-     (queue *cmds* (list :quit))
+     (when send-quit-cmd
+       (queue *cmds* (list :quit)))
      (stop-hci (getf *controller* :stop-signal))
      (bt:destroy-thread (nth 0 backend-thread))
      (bt:destroy-thread (nth 1 backend-thread))

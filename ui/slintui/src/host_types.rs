@@ -63,9 +63,9 @@ pub struct ScanResult {
     pub decoded: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct ScanResults {
-    results: Vec<ScanResult>,
+    pub results: Vec<ScanResult>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -88,7 +88,7 @@ pub struct EncryptionChange {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteEvent {
-    ScanResult(ScanResult),
+    ScanResults(ScanResults),
     ConnComplete(ConnComplete),
     Disconnected(Disconnected),
     Discovered(PeerDevice),

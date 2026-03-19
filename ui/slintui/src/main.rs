@@ -18,7 +18,7 @@ use tracing::{info, error, Level};
 
 fn scan_result_to_row(device: &ScanResult) -> ModelRc<StandardListViewItem> {
     let addr = format!("{}", device.address);
-    let data = format!("{:?}", device.data);
+    let data = format!("{:?}", device.decoded);
     let row_data = vec![
         StandardListViewItem::from(SharedString::from(&addr)),
         StandardListViewItem::from(SharedString::from(device.rssi.to_string())),
@@ -80,16 +80,19 @@ fn ui_update_gatt_server(own_gatt: &PeerDevice, ui_handle: &slint::Weak<AppWindo
         .unwrap();
 }
 
-fn ui_add_scan_result(ui_handle: &slint::Weak<AppWindow>, item: ScanResult) {
+fn ui_update_scan_results(ui_handle: &slint::Weak<AppWindow>, evt: ScanResults) {
     // TODO
     // make to and from row converters
-    let item = item.clone();
+    let evt = evt.clone();
     ui_handle
         .upgrade_in_event_loop(move |ui| {
             let device_rows = ui.get_scan_results_storage();
             let the_model = device_rows.as_any().downcast_ref::<VecModel<ModelRc<StandardListViewItem>>>()
                 .expect("Wrong row type");
-            the_model.push(scan_result_to_row(&item));
+            the_model.clear();
+            for result in evt.results {
+                the_model.push(scan_result_to_row(&result));
+            }
         })
         .unwrap();
 }
@@ -123,6 +126,10 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
+    info!("Spawning server");
+    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
+    info!("Lisp response {:?}", rsp);
+
     info!("startin events");
 
     let conns_: Box<Vec<PeerDevice>> = Box::new(Vec::new());
@@ -137,8 +144,8 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
     } {
         info!("Got event: {:?}", evt);
         match evt {
-            RemoteEvent::ScanResult(res) => {
-                ui_add_scan_result(&ui_handle, res);
+            RemoteEvent::ScanResults(res) => {
+                ui_update_scan_results(&ui_handle, res);
             }
             RemoteEvent::ConnComplete(res) => {
                 let a = res.address;
@@ -164,15 +171,15 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
         }
     }
 
+    info!("Killing server..");
+    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
+    info!("Lisp response {:?}", rsp);
+
     info!("quitting events");
 }
 
 async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteCommand>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
-
-    info!("Spawning server");
-    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
-    info!("Lisp response {:?}", rsp);
 
     while let Some(res) = rx_chan.recv().await {
         info!("JRPC THREAD: {:?}", res);
@@ -196,10 +203,6 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
             _ => {}
         }
     }
-
-    info!("Killing server..");
-    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
-    info!("Lisp response {:?}", rsp);
 
     cancel.cancel();
 }
@@ -351,6 +354,7 @@ fn main() {
 
     let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
+    // FIXME: this will kill the async tasks on exit rather than joining
     slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
 
     ui.run().unwrap();

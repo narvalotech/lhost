@@ -14,15 +14,27 @@
    (jsonrpc:server-listen *server* :port 55000 :mode :tcp))
  :name "JRPC server")
 
-(defun make-scan-result (address rssi name data &optional (decoded ""))
-  (list (cons "scan_result"
-              (list (cons "address"
-                          (list (cons "address_type" (car address))
-                                (cons "address" (cadr address))))
-                    (cons "rssi" rssi)
-                    (cons "name" name)
-                    (cons "data" data)
-                    (cons "decoded" (format nil "~X" decoded))))))
+(defun make-scan-result (device)
+  (destructuring-bind
+      (&key address-type address rssi data &allow-other-keys)
+      (car (getf device :reports))
+    (list (cons "address"
+                (list (cons "address_type" address-type)
+                      (cons "address" address)))
+          (cons "rssi" rssi)
+          (cons "name" (extract-name (getf device :parsed)))
+          (cons "data" (coerce data 'vector))
+          (cons "decoded" (format nil "~X" (getf device :parsed))))))
+
+(defun make-scan-results (results)
+  (let ((r (make-array 100 :fill-pointer 0 :adjustable t)))
+    (maphash (lambda (k v)
+               (declare (ignore k))
+               (vector-push-extend
+                (make-scan-result v) r))
+             results)
+    (list (cons "scan_results"
+                (list (cons "results" (coerce r 'vector)))))))
 
 (defun make-conn-complete (address conn)
   (list (cons "conn_complete"
@@ -43,13 +55,13 @@
   (case cmd
     (:open
      (progn
-       (stop-backend nil)
+       (stop-backend backend-thread)
        (sleep .1)
        (setf backend-thread (start-backend *evts*))
        (dispatch-cmd :init)))
     (:close
      (progn
-       (stop-backend backend-thread)
+       (stop-backend backend-thread t)
        (setf backend-thread nil)))
 
     (:start-scan
@@ -88,29 +100,33 @@
                          (handle-cmd :disconnect (gethash "disconnect" args)))
                         ))))
 
+;; TODO: make a "device" hashtable and clear it on start
+(defparameter *scanned-devices* (make-hash-table))
+(defparameter *last-scan-display* (get-internal-real-time))
+
 (defun evt->json (evt)
   (log-dbg "UI-EVT: ~A" evt)
   (case (if (listp evt) (car evt) evt)
+    (:display-scanned-devices
+     (progn
+       (make-scan-results *scanned-devices*)))
+
     (:evt
      (case (car (cadr evt))
        (:le-scan-report
-        (destructuring-bind
-            (&key address-type address timestamp rssi data)
-            (decode-scan-report (cadr evt))
-          (make-scan-result
-           (list address-type address)
-           rssi
-           (extract-name (parse-ad data))
-           (coerce data 'vector)
-           (parse-ad data))))
+        (progn
+          (accumulate-scan-reports *scanned-devices* (cadr evt))
+          (when (> (- (get-internal-real-time) *last-scan-display*) 10000)
+            (setf *last-scan-display* (get-internal-real-time))
+            (queue *evts* :display-scanned-devices)
+            nil)))
 
        (:le-enh-conn-complete
         (let* ((data (cadr (cadr evt)))
                (conn-handle (getf data :handle))
                (address-with-type (make-address
                                    (decode-c-int (getf data :peer-address) :u64)
-                                   (getf data :peer-address-type)))
-               (address (getf address-with-type :address)))
+                                   (getf data :peer-address-type))))
 
           (make-conn-complete
            (list
@@ -120,10 +136,9 @@
 
        (:disconnection-complete
         (destructuring-bind
-            (&key status handle reason)
+            (&key handle &allow-other-keys)
             (cadr evt)
-          (make-disconnected
-           handle)))
+          (make-disconnected handle)))
 
        (:otherwise
         (progn
@@ -135,5 +150,9 @@
                 ;; Only one concurrent client supported
                 (lambda (args)
                   (declare (ignore args))
-                  (let ((evt (sb-concurrency:receive-message *evts*)))
-                    (evt->json evt))))
+                  (log-inf ">>> Get event")
+                  (let ((rsp))
+                    (loop until rsp do
+                      (setf rsp (evt->json (sb-concurrency:receive-message *evts*))))
+                    (log-inf "<<< ~A" rsp)
+                    rsp)))
