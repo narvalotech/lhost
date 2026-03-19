@@ -2,6 +2,46 @@
 (ql:quickload '(:jsonrpc :usocket :yason))
 (setf yason:*list-encoder* 'yason:encode-alist)
 
+(defun make-att-ribute-type (type)
+  (case type
+    (:service "service")
+    (:characteristic-declaration "characteristic_declaration")
+    (:characteristic-value "characteristic_value")
+    (:characteristic-descriptor "characteristic_descriptor")))
+
+(defun uuid128 (uuid)
+  (if (= (get-uuid-size uuid) 16)
+      uuid
+      0))
+
+(defun uuid16 (uuid)
+  (if (= (get-uuid-size uuid) 2)
+      uuid
+      0))
+
+(defun gatt->json (gatt-table)
+  (list (cons "attributes"
+              (coerce
+               (loop for attribute in gatt-table
+                     collect
+                     (list
+                      (cons "handle" (getf attribute :handle))
+                      (cons "att_type" (make-att-ribute-type (getf attribute :type)))
+                      (cons "uuid16" (uuid16 (getf attribute :uuid)))
+                      (cons "uuid128" (uuid128 (getf attribute :uuid)))))
+               'vector))))
+
+(gatt->json *gatts-table*)
+
+(defun make-server-discovered (table)
+  (list (cons "server_discovered"
+              (list
+               (cons "address"
+                     (list (cons "address_type" 0)
+                           (cons "address" 0)))
+               (cons "conn_handle" #xFFFF)
+               (cons "gatt" (gatt->json table))))))
+
 (defun yap (input)
   (with-output-to-string (os)
     (yason:encode input os)))
@@ -110,6 +150,9 @@
     (:display-scanned-devices
      (progn
        (make-scan-results *scanned-devices*)))
+
+    (:gatt-server-table
+     (make-server-discovered (nth 1 evt)))
 
     (:evt
      (case (car (cadr evt))

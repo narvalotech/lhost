@@ -35,7 +35,8 @@ fn device_to_device_data(device: &PeerDevice) -> DeviceData { // wow what a bad 
     for att in device.gatt.attributes.clone() {
         let handle = format!("{:04X}", att.handle);
         let attt = format!("{:?}", att.att_type);
-        let uuid = format!("{:X}", att.uuid16); // todo: make converter fn
+        let uu = if att.uuid128 != 0 { att.uuid128 } else { att.uuid16 as u128 };
+        let uuid = format!("{:X}", uu);
 
         attributes.push(
             ModelRc::from(Rc::new(VecModel::from(

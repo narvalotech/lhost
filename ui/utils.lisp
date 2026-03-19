@@ -156,7 +156,10 @@
               (case (car cmd)
                 (:init
                  (log-inf "INIT CONTROLLER")
-                 (init-controller hci))
+                 (init-controller hci)
+                 (queue ui-events
+                        (list :gatt-server-table
+                              *gatts-table*)))
 
                 (:start-scan
                  (progn
