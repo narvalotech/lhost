@@ -122,6 +122,11 @@
        (dispatch-cmd :connect address)))
     (:disconnect
      (dispatch-cmd :disconnect (gethash "conn" args)))
+
+    (:att-read
+     (dispatch-cmd :att-read
+                   (gethash "conn" args)
+                   (gethash "handle" args)))
   )
   (format nil "execute: ~A" cmd))
 
@@ -139,11 +144,15 @@
                          (handle-cmd :start-scan))
                         ((string= "stop_scan" args)
                          (handle-cmd :stop-scan)))
+
                       (cond
                         ((gethash "connect" args)
                          (handle-cmd :connect (gethash "connect" args)))
                         ((gethash "disconnect" args)
                          (handle-cmd :disconnect (gethash "disconnect" args)))
+
+                        ((gethash "att_read" args)
+                         (handle-cmd :att-read (gethash "att_read" args)))
                         ))))
 
 ;; TODO: make a "device" hashtable and clear it on start

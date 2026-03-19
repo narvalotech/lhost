@@ -136,6 +136,17 @@ fn get_focused_conn_handle(ui_handle: &slint::Weak<AppWindow>) -> Option<u16> {
     }
 }
 
+fn get_selected_att_handle(ui_handle: &slint::Weak<AppWindow>) -> Option<u16> {
+    let ui = ui_handle.upgrade()?;
+
+    let handle = ui.get_current_att_handle();
+
+    match u16::from_str_radix(&handle, 16) {
+        Ok(number) => Some(number),
+        Err(_) => None,
+    }
+}
+
 // 1. get connected-evt -> build PeerDevice
 // 2. get discovered-evt -> build GattTable
 //   -> rebuild peerdevice tab w/ gatt & replace
@@ -206,11 +217,15 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
-            RemoteCommand::Connect { address: _ } => {
+            RemoteCommand::Connect {..} => {
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
-            RemoteCommand::Disconnect { conn: _ } => {
+            RemoteCommand::Disconnect {..} => {
+                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
+                info!("Lisp response {:?}", rsp);
+            }
+            RemoteCommand::AttRead {..} => {
                 let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
                 info!("Lisp response {:?}", rsp);
             }
@@ -327,6 +342,19 @@ fn main() {
                     info!("Disconnecting handle {}", conn_handle);
                     let cmd = RemoteCommand::Disconnect { conn: conn_handle };
                     tx_chan.blocking_send(cmd).unwrap();
+                } else {
+                    error!("Unable to determine conn handle");
+                }
+            }
+            Command::AttRead => {
+                if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
+                    if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
+                        info!("ATT read: {} {}", conn_handle, att_handle);
+                        let cmd = RemoteCommand::AttRead { conn: conn_handle, handle: att_handle, };
+                        tx_chan.blocking_send(cmd).unwrap();
+                    } else {
+                        error!("Unable to determine ATT handle");
+                    }
                 } else {
                     error!("Unable to determine conn handle");
                 }

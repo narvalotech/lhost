@@ -1892,7 +1892,9 @@
          (data (getf rsp :data)))
     (when rsp
       (if (att-error? (pull-int data :u8))
-          (log-dbg (format nil "ATT-READ-REQ ERROR: ~X" data))
+          (progn
+            (log-dbg (format nil "ATT-READ-REQ ERROR: ~X" data))
+            nil)
           data))))
 
 (defun find-gap-name-handle (table)

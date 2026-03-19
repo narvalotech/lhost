@@ -105,6 +105,7 @@ pub enum RemoteCommand {
     StopScan,
     Connect { address: Address },
     Disconnect { conn: u16 },
+    AttRead { conn: u16, handle: u16 },
 }
 
 #[derive(Serialize, Deserialize, Debug)]

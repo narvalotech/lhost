@@ -133,6 +133,7 @@
 
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
+  (hci-log-reset)
 
   ;; Empty events mailbox
   (loop until (sb-concurrency:mailbox-empty-p ui-events))
@@ -215,9 +216,16 @@
                                           conn-handle
                                           gattc-table))))
                 (:att-read
-                 (log-inf "ATT READ"))
+                 (let* ((conn-handle (nth 1 cmd))
+                        (att-handle (nth 2 cmd))
+                        (data (att-read hci conn-handle att-handle)))
+                   (log-inf "ATT READ: ~X" data)))
                 (:att-write
-                 (log-inf "ATT WRITE"))
+                 (let ((conn-handle (nth 1 cmd))
+                       (att-handle (nth 2 cmd))
+                       (data (nth 3 cmd)))
+                   (log-inf "ATT WRITE")
+                   (att-write hci conn-handle att-handle data)))
                 (:att-notify
                  (let* ((conn-handle (nth 1 cmd))
                         (handle (nth 2 cmd))
@@ -233,6 +241,7 @@
     :name "Host interface")))
 
 (defun stop-backend (backend-thread &optional send-quit-cmd)
+  (hci-log-write)
   (ignore-errors
    (when backend-thread
      (when send-quit-cmd

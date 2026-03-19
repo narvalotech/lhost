@@ -40,7 +40,7 @@ struct DeviceData {
 
 component GattView inherits Rectangle {
     in property <DeviceData> data;
-    in-out property <int> current-row: tv.current-row;
+    callback row-changed(int);
 
     min-width: 500px;
     min-height: 200px;
@@ -53,6 +53,9 @@ component GattView inherits Rectangle {
                 { title: "Value" },
             ];
             rows: root.data.gatt;
+            current-row-changed(index) => {
+                row-changed(index)
+            }
         }
     }
 }
@@ -111,6 +114,8 @@ export component AppWindow inherits Window {
     in-out property <ScanFilter> scan-filter: {text: "", column: 1, ascending: false};
 
     callback filter-scan-results(ScanFilter);
+    out property <int> current-att-row;
+    out property <string> current-att-handle;
 
     property <[MenuItemDesc]> buttons : [
         {title: "Start scan", id: Command.start-scan},
@@ -248,6 +253,10 @@ export component AppWindow inherits Window {
                         for device[i] in root.all-devices : GattView {
                             data: device;
                             visible: (root.active-tab == i+1) && !scan-focused && !gatt-server-focused;
+                            row-changed(index) => {
+                                root.current-att-row = index;
+                                root.current-att-handle = device.gatt[index][0].text;
+                            }
                         }
                     }
                 }
