@@ -402,9 +402,16 @@
                                           conn-handle
                                           gattc-table))))
                 (:att-read
-                 (log-inf "ATT READ"))
+                 (let* ((conn-handle (nth 1 cmd))
+                        (att-handle (nth 2 cmd))
+                        (data (att-read hci conn-handle att-handle)))
+                   (log-inf "ATT READ: ~X" data)))
                 (:att-write
-                 (log-inf "ATT WRITE"))
+                 (let ((conn-handle (nth 1 cmd))
+                       (att-handle (nth 2 cmd))
+                       (data (nth 3 cmd)))
+                   (log-inf "ATT WRITE")
+                   (att-write hci conn-handle att-handle data)))
                 (:att-notify
                  (let* ((conn-handle (nth 1 cmd))
                         (handle (nth 2 cmd))
@@ -723,7 +730,7 @@
                   (handle (get-selected-attribute (getf conn :treeview))))
              (when handle
                (log-inf "[~A] att-read ~4,'0,X" tab-name handle)
-               (dispatch-cmd :att-read (getf conn :address) handle))
+               (dispatch-cmd :att-read (getf conn :handle) handle))
              t))
           (:att-write
            (let* ((tab-name (get-tab-text activity-frame))
@@ -739,7 +746,7 @@
                       (parsed-data (fromhexstream data)))
                  (when parsed-data
                    (unless cccd (setf previous-gatt-write data))
-                   (dispatch-cmd :att-write (getf conn :address) handle data))))
+                   (dispatch-cmd :att-write (getf conn :handle) handle parsed-data))))
              t))
           (:att-notify
            ;; TODO: log writes/reads to UI window too
