@@ -2639,6 +2639,11 @@
 
 (defconstant +our-iocap+ '(#x03 #x00 #x09))
 
+(defun smp-send (hci conn-handle payload)
+  (when payload
+    ;; (log-dbg (format nil "SMP-TX ~X" payload))
+    (l2cap-send hci conn-handle +l2cap-smp-chan+ payload)))
+
 (defun smp-send-security-req (hci conn)
   (smp-send
    hci conn (smp-make-packet
@@ -2733,11 +2738,6 @@
         (smp-make-packet :pairing-public-key
                          our-pubkey-le))))
 
-(defun smp-send (hci conn-handle payload)
-  (when payload
-    ;; (log-dbg (format nil "SMP-TX ~X" payload))
-    (l2cap-send hci conn-handle +l2cap-smp-chan+ payload)))
-
 (defun smp-get-our-pubkey (conn)
   (subseq (smp-get-privkey conn) 0 32))
 
@@ -2763,12 +2763,6 @@
   ;; next step is sending our random
   (smp-make-packet :pairing-random
                    (getf (get-smp-context conn) :random-central)))
-
-(defun smp-send-dhkey-check-ea (hci conn)
-  (let* ((dhkey-check-Ea (smp-compute-dhkey-check conn :Ea t)))
-    (smp-send hci conn
-              (smp-make-packet :pairing-dhkey-check
-                               dhkey-check-Ea))))
 
 (defun smp-process-random (conn data)
   (let* ((peer-random data))
@@ -2955,6 +2949,12 @@
   (declare (ignore data))
   (log-inf (format nil "PAIRING FAILED (conn ~A)" conn))
   nil)
+
+(defun smp-send-dhkey-check-ea (hci conn)
+  (let* ((dhkey-check-Ea (smp-compute-dhkey-check conn :Ea t)))
+    (smp-send hci conn
+              (smp-make-packet :pairing-dhkey-check
+                               dhkey-check-Ea))))
 
 (defun handle-smp (hci conn packet)
   (let* ((data (getf packet :data))
