@@ -358,9 +358,10 @@
                    (setf (getf (getf *active-conns* conn-handle) :address)
                          peer-address)))
                 (:bond
-                 (let ((conn-handle (nth 1 cmd)))
+                 (let ((conn-handle (nth 1 cmd))
+                       (is-central (nth 2 cmd)))
                    (log-inf "BOND (re-encrypt w/ LTK: ~X)"
-                            (start-security hci conn-handle t))
+                            (start-security hci conn-handle :is-peripheral (not is-central)))
                    ))
                 (:load-bonds
                  (let ((bond-filename (nth 1 cmd)))
@@ -518,6 +519,7 @@
          (filter-scan-name "")
          (last-scan-display (get-internal-real-time))
          (bond-filename "bonds.txt")
+         (we-are-central t)
          )
 
     ;; Register quit action
@@ -664,7 +666,9 @@
              (queue ui-events :display-scanned-devices)
              t))
           (:start-scan
-           (dispatch-cmd evt))
+           (progn
+             (setf we-are-central t)
+             (dispatch-cmd evt)))
           (:stop-scan
            (dispatch-cmd evt))
           (:filter-scan
@@ -701,8 +705,8 @@
              (unless (equalp "Scanner" name)
                (ignore-errors
                 (let ((handle (getf (gethash (decode-mac name) connections) :handle)))
-                  (log-inf "Bonding ~a" name)
-                  (dispatch-cmd :bond handle))))
+                  (log-inf "Bonding ~a. We are ~A." name (if we-are-central "central" "peripheral"))
+                  (dispatch-cmd :bond handle we-are-central))))
              t))
 
           (:clear-bonds
@@ -772,6 +776,7 @@
 
           (:start-adv
            (progn
+             (setf we-are-central nil)
              (dispatch-cmd :start-adv)
              t))
           (:stop-adv (progn
