@@ -2342,16 +2342,20 @@
 
 (defun gatts-find-info-rsp (table start end)
   (let* ((uuid-size)
+         (terminate nil)
          (information-data
            (when (>= (length table) start)
              (apply #'nconc
                     (mapcar
                      (lambda (a)
-                       (unless uuid-size
-                         (setf uuid-size (get-uuid-size (getf a :uuid))))
-                       (when (= uuid-size (get-uuid-size (getf a :uuid)))
-                         (append (make-c-int :u16 (getf a :handle))
-                                 (make-c-int :u16 (getf a :uuid)))))
+                       (unless terminate
+                         (unless uuid-size
+                           (setf uuid-size (get-uuid-size (getf a :uuid))))
+                         (unless (= uuid-size (get-uuid-size (getf a :uuid)))
+                           (setf terminate t))
+                         (unless terminate
+                             (append (make-c-int :u16 (getf a :handle))
+                                     (make-uint uuid-size (getf a :uuid))))))
                      (subseq table
                              (- (min (length table) start) 1)
                              (min (length table) end)))))))
