@@ -118,6 +118,24 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
     None
 }
 
+fn get_focused_conn_handle(ui_handle: &slint::Weak<AppWindow>) -> Option<u16> {
+    let ui = ui_handle.upgrade()?;
+
+    let selected_index: i32 = ui.get_active_tab() - 1;
+    if selected_index < 0 {
+        return None;
+    }
+
+    let device_list = ui.get_all_devices();
+    let the_model = device_list.as_any().downcast_ref::<VecModel<DeviceData>>().expect("Wrong type");
+
+    if let Some(device_data) = the_model.row_data(selected_index as usize) {
+        Some(device_data.conn as u16)
+    } else {
+        None
+    }
+}
+
 // 1. get connected-evt -> build PeerDevice
 // 2. get discovered-evt -> build GattTable
 //   -> rebuild peerdevice tab w/ gatt & replace
@@ -301,8 +319,13 @@ fn main() {
                 }
             }
             Command::Disconnect => {
-                let cmd = RemoteCommand::Disconnect { conn: 1 };
-                tx_chan.blocking_send(cmd).unwrap();
+                if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
+                    info!("Disconnecting handle {}", conn_handle);
+                    let cmd = RemoteCommand::Disconnect { conn: conn_handle };
+                    tx_chan.blocking_send(cmd).unwrap();
+                } else {
+                    error!("Unable to determine conn handle");
+                }
             }
             _ => {
                 info!("UNHANDLED");
@@ -369,11 +392,10 @@ fn main() {
 // Road to feature-parity
 // - scan
 //   - [x] scanned device view
-//   - [ ] display merged AD
+//   - [x] display merged AD
 //   - [x] sort by rssi / name
 //   - [x] filter addr/name
-//   - [ ] deduplicate (in jrpc)
-//     - similar pattern as ltk
+//   - [x] deduplicate (in jrpc)
 // - connect
 //   - [x] log view (gatt operations)
 //   - [x] gatt listview

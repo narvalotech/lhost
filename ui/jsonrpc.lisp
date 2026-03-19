@@ -137,7 +137,7 @@
        (:disconnection-complete
         (destructuring-bind
             (&key handle &allow-other-keys)
-            (cadr evt)
+            (cadr (cadr evt))
           (make-disconnected handle)))
 
        (:otherwise
