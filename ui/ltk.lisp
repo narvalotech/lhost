@@ -483,7 +483,9 @@
    (getf report :address-type)))
 
 (setf *bonds* (make-hash-table))
-(ng:with-nodgui (#+win32 (:wish-shell-path "C:/msys64/ucrt64/bin/wish.exe"))
+(ng:with-nodgui
+  #+win32 (:wish-shell-path "C:/msys64/ucrt64/bin/wish.exe")
+  #-win32 ()
   (hci-log-reset)
   (ng:wm-title ng:*tk* "Azul '94")
 
