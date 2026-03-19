@@ -126,10 +126,6 @@ fn get_current_row(ui_handle: &slint::Weak<AppWindow>) -> Option<Address> {
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
-    info!("Spawning server");
-    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
-    info!("Lisp response {:?}", rsp);
-
     info!("startin events");
 
     let conns_: Box<Vec<PeerDevice>> = Box::new(Vec::new());
@@ -170,10 +166,6 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             }
         }
     }
-
-    info!("Killing server..");
-    let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
-    info!("Lisp response {:?}", rsp);
 
     info!("quitting events");
 }
@@ -260,6 +252,17 @@ async fn async_main(
     info!("Exiting..");
 
     Ok(())
+}
+
+fn start_server(start: bool) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let command = if start { RemoteCommand::Open } else { RemoteCommand::Close };
+    rt.block_on(async {
+        info!("{} server", if start { "spawning" } else { "killing" });
+        let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+        let rsp: String = client.call(RemoteMethod::Command(command)).await.unwrap();
+        info!("Lisp response {:?}", rsp);
+    });
 }
 
 fn main() {
@@ -352,12 +355,15 @@ fn main() {
     let gatt_server = DeviceData::default();
     ui.set_gatt_server(gatt_server);
 
+    start_server(true);
+
     let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
-    // FIXME: this will kill the async tasks on exit rather than joining
     slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
 
     ui.run().unwrap();
+
+    start_server(false);
 }
 
 // Road to feature-parity
