@@ -13,6 +13,7 @@ pub struct JsonRpcRequest {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 pub struct JsonRpcResponse<T> {
     pub result: Option<T>,
     pub error: Option<Value>,

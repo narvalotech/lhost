@@ -55,6 +55,7 @@ pub struct Address {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+#[allow(dead_code)]
 pub struct ScanResult {
     pub address: Address,
     pub rssi: i8,

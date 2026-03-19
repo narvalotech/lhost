@@ -75,7 +75,6 @@ fn ui_update_gatt_server(own_gatt: &PeerDevice, ui_handle: &slint::Weak<AppWindo
 
     ui_handle
         .upgrade_in_event_loop(move |ui| {
-            let gatt_server = ui.get_gatt_server();
             ui.set_gatt_server(device_to_device_data(&gatt));
         })
         .unwrap();
@@ -270,7 +269,7 @@ async fn async_main(
         }
     });
 
-    tokio::join!(events_tid, cmds_tid, log_tid);
+    let _ = tokio::join!(events_tid, cmds_tid, log_tid);
 
     info!("Exiting..");
 
