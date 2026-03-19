@@ -171,9 +171,13 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             RemoteEvent::Discovered(res) => {
                 // TODO: better way?
                 let conn = res.conn_handle;
-                let _ = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
-                conns.push(res);
-                ui_update_devices(conns, &ui_handle);
+                let prev = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
+                if prev.len() > 0 {
+                    let mut edited = prev[0].clone();
+                    edited.gatt = res.gatt;
+                    conns.push(edited);
+                    ui_update_devices(conns, &ui_handle);
+                }
             }
             RemoteEvent::ServerDiscovered(res) => {
                 ui_update_gatt_server(&res, &ui_handle);
@@ -406,7 +410,7 @@ fn main() {
 //     - needs window menus
 // - gatt
 //   - [x] show own table
-//   - [ ] discovery
+//   - [x] discovery
 //   - [ ] read/write
 //   - [ ] notify
 // - misc

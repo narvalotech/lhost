@@ -36,10 +36,16 @@
 (defun make-server-discovered (table)
   (list (cons "server_discovered"
               (list
+               (cons "conn_handle" #xFFFF)
+               (cons "gatt" (gatt->json table))))))
+
+(defun make-client-discovered (conn table)
+  (list (cons "discovered"
+              (list
                (cons "address"
                      (list (cons "address_type" 0)
                            (cons "address" 0)))
-               (cons "conn_handle" #xFFFF)
+               (cons "conn_handle" conn)
                (cons "gatt" (gatt->json table))))))
 
 (defun yap (input)
@@ -154,6 +160,11 @@
     (:gatt-server-table
      (make-server-discovered (nth 1 evt)))
 
+    (:gatt-discovery-end
+     (let* ((conn-handle (nth 1 evt))
+            (table (nth 2 evt)))
+       (make-client-discovered conn-handle table)))
+
     (:evt
      (case (car (cadr evt))
        (:le-scan-report
@@ -170,6 +181,9 @@
                (address-with-type (make-address
                                    (decode-c-int (getf data :peer-address) :u64)
                                    (getf data :peer-address-type))))
+
+          ;; Kick off GATT discovery
+          (dispatch-cmd :discover-gatt conn-handle)
 
           (make-conn-complete
            (list
