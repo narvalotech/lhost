@@ -6,6 +6,7 @@
 - focus new connection
 - focus prev tab on disconnect
 - auto-resize scan / gatt columns
+- device selection / backend bar
 
 * feature ideas
 
@@ -13,6 +14,7 @@
 - "stop ATT traffic" button / option
   - allows to e.g. do encryption fully before allowing discovery
   - already sort-of implemented for MITM
+- uuid name resolution (assigned numbers repo)
 
 * random code snippets
 

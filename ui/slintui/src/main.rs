@@ -208,29 +208,8 @@ async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver
 
     while let Some(res) = rx_chan.recv().await {
         info!("JRPC THREAD: {:?}", res);
-        match res {
-            RemoteCommand::StartScan => {
-                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
-            }
-            RemoteCommand::StopScan => {
-                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
-            }
-            RemoteCommand::Connect {..} => {
-                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
-            }
-            RemoteCommand::Disconnect {..} => {
-                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
-            }
-            RemoteCommand::AttRead {..} => {
-                let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
-                info!("Lisp response {:?}", rsp);
-            }
-            _ => {}
-        }
+        let rsp: String = client.call(RemoteMethod::Command(res)).await.unwrap();
+        info!("Lisp response {:?}", rsp);
     }
 
     cancel.cancel();
@@ -359,6 +338,45 @@ fn main() {
                     error!("Unable to determine conn handle");
                 }
             }
+            Command::AttWriteReq => {
+                if let Some(_) = get_focused_conn_handle(&ui_handle) {
+                    if let Some(_) = get_selected_att_handle(&ui_handle) {
+                        let ui = ui_handle.upgrade().unwrap();
+                        ui.invoke_popup_gatt_write();
+                    } else {
+                        error!("Unable to determine ATT handle");
+                    }
+                } else {
+                    error!("Unable to determine conn handle");
+                }
+            }
+            Command::AttWriteHandle => {
+                // TODO: figure out how a sane way to do popups
+                if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
+                    if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
+                        let ui = ui_handle.upgrade().unwrap();
+                        let hexstr = ui.get_gatt_write_text();
+                        let bytes: Vec<u8> = hexstr
+                            .chars()
+                            .filter(|c| !c.is_whitespace())
+                            .collect::<Vec<char>>()
+                            .chunks(2)
+                            .map(|chunk| {
+                                let s: String = chunk.iter().collect();
+                                u8::from_str_radix(&s, 16).expect("Invalid hex")
+                            })
+                            .collect();
+                        let cmd = RemoteCommand::AttWrite { conn: conn_handle,
+                                                            handle: att_handle,
+                                                            data: bytes, };
+                        tx_chan.blocking_send(cmd).unwrap();
+                    } else {
+                        error!("Unable to determine ATT handle");
+                    }
+                } else {
+                    error!("Unable to determine conn handle");
+                }
+            }
             _ => {
                 info!("UNHANDLED");
             }
@@ -438,7 +456,7 @@ fn main() {
 // - gatt
 //   - [x] show own table
 //   - [x] discovery
-//   - [ ] read/write
+//   - [x] read/write
 //   - [ ] notify
 // - misc
 //   - [x] real jsonrpc server

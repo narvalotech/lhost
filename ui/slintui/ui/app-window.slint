@@ -1,6 +1,7 @@
 import {
     Button,
     StandardTableView,
+    StandardButton,
     TextEdit,
     LineEdit,
     TabWidget,
@@ -60,6 +61,76 @@ component GattView inherits Rectangle {
     }
 }
 
+component PopTart inherits PopupWindow {
+    x: (root.width - self.width) / 2;
+    y: (root.height - self.height) / 2;
+    width: 300px;
+    height: 300px;
+
+    in property <string> title: "Default title";
+    in property <string> text: "Default text";
+    in property <string> placeholder: "Default placeholder";
+    out property <string> result <=> le.text;
+    callback entered(string);
+
+    close-policy: close-on-click-outside;
+
+    // calling this from main window is not possible for some reason
+    function open () {
+        root.show();
+        pf.focus();
+    }
+
+    pf := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                debug("Confirmed via Enter!");
+                root.close();
+                entered(result);
+                return accept;
+            }
+            reject
+        }
+
+        Dialog {
+            title: title;
+
+            VerticalBox {
+                padding: 10px;
+                spacing: 10px;
+
+                Text {
+                    text: text;
+                }
+
+                le := LineEdit {
+                    placeholder-text: placeholder;
+                }
+            }
+
+            StandardButton {
+                kind: ok;
+                primary: true;
+                clicked => {
+                    root.close();
+                    entered(result);
+                }
+            }
+
+            StandardButton {
+                kind: cancel;
+                clicked => {
+                    root.close();
+                }
+            }
+        }
+    }
+}
+
 export struct ScanFilter {
     text: string,
     column: int,
@@ -81,6 +152,7 @@ export enum Command {
     att-read,
     att-write-cmd,
     att-write-req,
+    att-write-handle,
     att-read-own,
     att-write-own,
     att-notify
@@ -116,6 +188,11 @@ export component AppWindow inherits Window {
     callback filter-scan-results(ScanFilter);
     out property <int> current-att-row;
     out property <string> current-att-handle;
+    in-out property <bool> is_dialog_open: false;
+    out property <string> gatt-write-text;
+    public function popup-gatt-write() {
+        poptart.show();
+    }
 
     property <[MenuItemDesc]> buttons : [
         {title: "Start scan", id: Command.start-scan},
@@ -271,6 +348,16 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    poptart := PopTart {
+        title: "GATT Write";
+        text: "Gatt Write";
+        placeholder: "GATT Write Data (e,g, 01 ef 32 c1)";
+        entered(text) => {
+            root.gatt-write-text = text;
+            button(Command.att-write-handle);
         }
     }
 }

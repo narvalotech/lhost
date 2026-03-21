@@ -127,6 +127,12 @@
      (dispatch-cmd :att-read
                    (gethash "conn" args)
                    (gethash "handle" args)))
+
+    (:att-write
+     (dispatch-cmd :att-write
+                   (gethash "conn" args)
+                   (gethash "handle" args)
+                   (coerce (gethash "data" args) 'list)))
   )
   (format nil "execute: ~A" cmd))
 
@@ -153,6 +159,8 @@
 
                         ((gethash "att_read" args)
                          (handle-cmd :att-read (gethash "att_read" args)))
+                        ((gethash "att_write" args)
+                         (handle-cmd :att-write (gethash "att_write" args)))
                         ))))
 
 ;; TODO: make a "device" hashtable and clear it on start
