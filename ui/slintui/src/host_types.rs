@@ -5,17 +5,11 @@ use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ATTPacket {
-    repr: String,
+    conn_handle: u16,
     op: u8,
     handle: u16,
     data: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AttOperation {
-    conn_handle: u16,
-    op: u8,
-    data: Vec<u8>,
+    pub repr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
@@ -94,6 +88,7 @@ pub enum RemoteEvent {
     Disconnected(Disconnected),
     Discovered(PeerDevice),
     ServerDiscovered(PeerDevice),
+    AttPacket(ATTPacket),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

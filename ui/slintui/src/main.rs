@@ -197,6 +197,9 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
                 let _ = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
                 ui_update_devices(conns, &ui_handle);
             }
+            RemoteEvent::AttPacket(res) => {
+                info!("ATT RX: {}", res.repr);
+            }
         }
     }
 

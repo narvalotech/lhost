@@ -93,6 +93,14 @@
   (list (cons "disconnected"
               (list (cons "conn_handle" handle)))))
 
+(defun make-att-event (repr)
+  (list (cons "att_packet"
+              (list (cons "conn_handle" #xFFFF)
+                    (cons "op" #xFF)
+                    (cons "handle" #xFFFF)
+                    (cons "data" #())
+                    (cons "repr" repr)))))
+
 (defparameter *cmds* (make-mailbox "ui backend -> host"))
 (defparameter *evts* (make-mailbox "ui backend <- host"))
 (defvar backend-thread nil)
@@ -218,7 +226,15 @@
         (progn
           (log-inf "EVENT: ~X" evt)
           "unknown-event"))
-       ))))
+       ))
+
+    (:acl
+     (let ((att-packet (decode-att (cadr evt))))
+       (when att-packet
+         (log-inf "ATT RX: ~X" att-packet)
+         (make-att-event (format nil "~X" att-packet))
+         )))
+     ))
 
 (jsonrpc:expose *server* "get_event"
                 ;; Only one concurrent client supported

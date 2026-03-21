@@ -1926,6 +1926,7 @@
   (let* ((rsp (att-receive hci conn :write-rsp))
          (data (getf rsp :data)))
     (when rsp
+      (log-dbg "WRITE RSP: ~X" rsp)
       (if (att-error? (pull-int data :u8))
           (log-dbg (format nil "ATT-WRITE-REQ ERROR: ~X" data))
           data))))
