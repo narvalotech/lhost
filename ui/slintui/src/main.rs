@@ -147,6 +147,18 @@ fn get_selected_att_handle(ui_handle: &slint::Weak<AppWindow>) -> Option<u16> {
     }
 }
 
+fn fromhex(input: SharedString) -> Vec<u8> {
+    input.chars()
+         .filter(|c| !c.is_whitespace())
+         .collect::<Vec<char>>()
+        .chunks(2)
+        .map(|chunk| {
+            let s: String = chunk.iter().collect();
+            u8::from_str_radix(&s, 16).expect("Invalid hex")
+        })
+        .collect()
+}
+
 // 1. get connected-evt -> build PeerDevice
 // 2. get discovered-evt -> build GattTable
 //   -> rebuild peerdevice tab w/ gatt & replace
@@ -355,6 +367,16 @@ fn main() {
                     error!("Unable to determine conn handle");
                 }
             }
+            Command::AttNotify => {
+                if let Some(_) = get_selected_att_handle(&ui_handle) {
+                    let ui = ui_handle.upgrade().unwrap();
+                    ui.invoke_popup_data_entry(Command::AttNotify,
+                                               "GATT Notify".into(),
+                                               "GATT Notify Data (e,g, 01 ef 32 c1)".into());
+                } else {
+                    error!("Unable to determine ATT handle");
+                }
+            }
             Command::DataEntryRsp => {
                 let ui = ui_handle.upgrade().unwrap();
                 let cmd = ui.get_data_entry_command();
@@ -362,17 +384,7 @@ fn main() {
                     Command::AttWriteReq => {
                         if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
                             if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
-                                let hexstr = ui.get_data_entry_user_text();
-                                let bytes: Vec<u8> = hexstr
-                                    .chars()
-                                    .filter(|c| !c.is_whitespace())
-                                    .collect::<Vec<char>>()
-                                    .chunks(2)
-                                    .map(|chunk| {
-                                        let s: String = chunk.iter().collect();
-                                        u8::from_str_radix(&s, 16).expect("Invalid hex")
-                                    })
-                                    .collect();
+                                let bytes = fromhex(ui.get_data_entry_user_text());
                                 let cmd = RemoteCommand::AttWrite { conn: conn_handle,
                                                                     handle: att_handle,
                                                                     data: bytes, };
@@ -384,6 +396,17 @@ fn main() {
                             error!("Unable to determine conn handle");
                         }
                     }
+                    Command::AttNotify => {
+                            if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
+                                let bytes = fromhex(ui.get_data_entry_user_text());
+                                let cmd = RemoteCommand::AttNotify { conn: 0,
+                                                                     handle: att_handle,
+                                                                     data: bytes, };
+                                tx_chan.blocking_send(cmd).unwrap();
+                            } else {
+                                error!("Unable to determine ATT handle");
+                            }
+                        }
                     _ => {
                         error!("unhandled data entry cmd: {:?}", cmd);
                     }
@@ -470,7 +493,7 @@ fn main() {
 //   - [x] show own table
 //   - [x] discovery
 //   - [x] read/write
-//   - [ ] notify
+//   - [x] notify
 // - misc
 //   - [x] real jsonrpc server
 //   - [ ] keyboard shortcuts

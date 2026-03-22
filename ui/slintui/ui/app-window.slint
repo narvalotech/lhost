@@ -331,6 +331,10 @@ export component AppWindow inherits Window {
 
                         gatt-server := GattView {
                             visible: gatt-server-focused;
+                            row-changed(index) => {
+                                root.current-att-row = index;
+                                root.current-att-handle = self.data.gatt[index][0].text;
+                            }
                         }
 
                         for device[i] in root.all-devices : GattView {

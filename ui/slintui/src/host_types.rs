@@ -102,6 +102,7 @@ pub enum RemoteCommand {
     Disconnect { conn: u16 },
     AttRead { conn: u16, handle: u16 },
     AttWrite { conn: u16, handle: u16, data: Vec<u8> },
+    AttNotify { conn: u16, handle: u16, data: Vec<u8> },
 }
 
 #[derive(Serialize, Deserialize, Debug)]

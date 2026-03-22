@@ -135,9 +135,13 @@
      (dispatch-cmd :att-read
                    (gethash "conn" args)
                    (gethash "handle" args)))
-
     (:att-write
      (dispatch-cmd :att-write
+                   (gethash "conn" args)
+                   (gethash "handle" args)
+                   (coerce (gethash "data" args) 'list)))
+    (:att-notify
+     (dispatch-cmd :att-notify
                    (gethash "conn" args)
                    (gethash "handle" args)
                    (coerce (gethash "data" args) 'list)))
@@ -169,6 +173,8 @@
                          (handle-cmd :att-read (gethash "att_read" args)))
                         ((gethash "att_write" args)
                          (handle-cmd :att-write (gethash "att_write" args)))
+                        ((gethash "att_notify" args)
+                         (handle-cmd :att-notify (gethash "att_notify" args)))
                         ))))
 
 ;; TODO: make a "device" hashtable and clear it on start
