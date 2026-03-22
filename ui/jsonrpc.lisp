@@ -36,6 +36,9 @@
 (defun make-server-discovered (table)
   (list (cons "server_discovered"
               (list
+               (cons "address"
+                     (list (cons "address_type" 0)
+                           (cons "address" 0)))
                (cons "conn_handle" #xFFFF)
                (cons "gatt" (gatt->json table))))))
 
@@ -93,6 +96,12 @@
   (list (cons "disconnected"
               (list (cons "conn_handle" handle)))))
 
+(defun make-enc-change (conn status enabled)
+  (list (cons "encryption_change"
+              (list (cons "conn_handle" conn)
+                    (cons "status" status)
+                    (cons "enabled" enabled)))))
+
 (defun make-att-event (repr)
   (list (cons "att_packet"
               (list (cons "conn_handle" #xFFFF)
@@ -104,6 +113,7 @@
 (defparameter *cmds* (make-mailbox "ui backend -> host"))
 (defparameter *evts* (make-mailbox "ui backend <- host"))
 (defvar backend-thread nil)
+(defparameter *bond-filename* "slintui-bonds")
 
 (defun handle-cmd (cmd &optional args)
   (case cmd
@@ -122,6 +132,15 @@
      (dispatch-cmd :start-scan))
     (:stop-scan
      (dispatch-cmd :stop-scan))
+    (:stash-bonds
+     (dispatch-cmd :stash-bonds))
+    (:unstash-bonds
+     (dispatch-cmd :unstash-bonds))
+    (:clear-bonds
+     (progn
+       (dispatch-cmd :store-bonds (format nil "~A.bak" *bond-filename*))
+       (dispatch-cmd :clear-bonds *bond-filename*)
+       (dispatch-cmd :store-bonds *bond-filename*)))
 
     (:connect
      (let ((address
@@ -130,6 +149,8 @@
        (dispatch-cmd :connect address)))
     (:disconnect
      (dispatch-cmd :disconnect (gethash "conn" args)))
+    (:bond
+     (dispatch-cmd :bond (gethash "conn" args)))
 
     (:att-read
      (dispatch-cmd :att-read
@@ -161,13 +182,22 @@
                         ((string= "start_scan" args)
                          (handle-cmd :start-scan))
                         ((string= "stop_scan" args)
-                         (handle-cmd :stop-scan)))
+                         (handle-cmd :stop-scan))
+
+                        ((string= "clear_bonds" args)
+                         (handle-cmd :clear-bonds))
+                        ((string= "stash_bonds" args)
+                         (handle-cmd :stash-bonds))
+                        ((string= "unstash_bonds" args)
+                         (handle-cmd :unstash-bonds)))
 
                       (cond
                         ((gethash "connect" args)
                          (handle-cmd :connect (gethash "connect" args)))
                         ((gethash "disconnect" args)
                          (handle-cmd :disconnect (gethash "disconnect" args)))
+                        ((gethash "bond" args)
+                         (handle-cmd :bond (gethash "bond" args)))
 
                         ((gethash "att_read" args)
                          (handle-cmd :att-read (gethash "att_read" args)))
@@ -189,7 +219,9 @@
        (make-scan-results *scanned-devices*)))
 
     (:gatt-server-table
-     (make-server-discovered (nth 1 evt)))
+     (progn
+       (dispatch-cmd :load-bonds *bond-filename*)
+       (make-server-discovered (nth 1 evt))))
 
     (:gatt-discovery-end
      (let* ((conn-handle (nth 1 evt))
@@ -213,14 +245,29 @@
                                    (decode-c-int (getf data :peer-address) :u64)
                                    (getf data :peer-address-type))))
 
+          ;; Reset SMP context
+          (dispatch-cmd :clear-security conn-handle address-with-type)
+
           ;; Kick off GATT discovery
           (dispatch-cmd :discover-gatt conn-handle)
 
+          ;; Notify UI we are connected
           (make-conn-complete
            (list
             (getf address-with-type :type)
             (getf address-with-type :address))
            conn-handle)))
+
+       (:encryption-change
+        (let* ((data (cadr (cadr evt)))
+               (conn-handle (getf data :handle))
+               (enabled (getf data :enabled))
+               (status (getf data :status)))
+
+          (log-inf "[~X] BONDED OK" conn-handle)
+          (dispatch-cmd :store-bonds *bond-filename*)
+          (make-enc-change conn-handle status enabled)
+          ))
 
        (:disconnection-complete
         (destructuring-bind

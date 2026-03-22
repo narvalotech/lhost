@@ -76,8 +76,9 @@ pub struct Disconnected {
 
 #[derive(Deserialize, Debug)]
 pub struct EncryptionChange {
-    status: u8,
-    conn_handle: u16,
+    pub conn_handle: u16,
+    pub status: u8,
+    pub enabled: u8,
 }
 
 #[derive(Deserialize, Debug)]
@@ -86,6 +87,7 @@ pub enum RemoteEvent {
     ScanResults(ScanResults),
     ConnComplete(ConnComplete),
     Disconnected(Disconnected),
+    EncryptionChange(EncryptionChange),
     Discovered(PeerDevice),
     ServerDiscovered(PeerDevice),
     AttPacket(ATTPacket),
@@ -100,6 +102,10 @@ pub enum RemoteCommand {
     StopScan,
     Connect { address: Address },
     Disconnect { conn: u16 },
+    Bond { conn: u16 },
+    ClearBonds,
+    StashBonds,
+    UnstashBonds,
     AttRead { conn: u16, handle: u16 },
     AttWrite { conn: u16, handle: u16, data: Vec<u8> },
     AttNotify { conn: u16, handle: u16, data: Vec<u8> },

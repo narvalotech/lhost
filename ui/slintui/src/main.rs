@@ -159,11 +159,6 @@ fn fromhex(input: SharedString) -> Vec<u8> {
         .collect()
 }
 
-// 1. get connected-evt -> build PeerDevice
-// 2. get discovered-evt -> build GattTable
-//   -> rebuild peerdevice tab w/ gatt & replace
-// 3. ...
-// 4. profit!
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
     let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
 
@@ -208,6 +203,10 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
                 let conn = res.conn_handle;
                 let _ = conns.extract_if(.., |c| c.conn_handle as u16 == conn).collect::<Vec<_>>();
                 ui_update_devices(conns, &ui_handle);
+            }
+            RemoteEvent::EncryptionChange(res) => {
+                // TODO: ui element
+                info!("Encryption Change: conn {} status {} enabled {}", res.conn_handle, res.status, res.enabled);
             }
             RemoteEvent::AttPacket(res) => {
                 info!("ATT RX: {}", res.repr);
@@ -339,6 +338,30 @@ fn main() {
                 } else {
                     error!("Unable to determine conn handle");
                 }
+            }
+            Command::Bond => {
+                if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
+                    info!("Bonding conn {}", conn_handle);
+                    let cmd = RemoteCommand::Bond { conn: conn_handle };
+                    tx_chan.blocking_send(cmd).unwrap();
+                } else {
+                    error!("Unable to determine conn handle");
+                }
+            }
+            Command::ClearBonds => {
+                info!("Deleting bonds");
+                let cmd = RemoteCommand::ClearBonds;
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            Command::StashBonds => {
+                info!("Stashing bonds");
+                let cmd = RemoteCommand::StashBonds;
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            Command::UnstashBonds => {
+                info!("Unstashing bonds");
+                let cmd = RemoteCommand::UnstashBonds;
+                tx_chan.blocking_send(cmd).unwrap();
             }
             Command::AttRead => {
                 if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
@@ -487,8 +510,7 @@ fn main() {
 //   - [x] gatt listview
 //     - later: use tree https://github.com/slint-ui/slint/discussions/1042
 //   - [x] add/delete tab on connected/disconnected events
-//   - [ ] encrypt / bond management
-//     - needs window menus
+//   - [x] encrypt / bond management
 // - gatt
 //   - [x] show own table
 //   - [x] discovery

@@ -132,6 +132,26 @@
    (subseq (make-c-int :u64 (getf address :address)) 0 6)
    :type (getf address :type)))
 
+(defun save-hash-table (table filename)
+  (with-open-file (out filename
+                       :direction :output
+                       :if-exists :supersede)
+    ;; Store the test type so we can recreate it correctly
+    (print (hash-table-test table) out)
+    ;; Store the data as an alist
+    (let ((alist '()))
+      (maphash (lambda (k v) (push (cons k v) alist)) table)
+      (print alist out))))
+
+(defun load-hash-table (filename)
+  (with-open-file (in filename)
+    (let* ((test (read in))
+           (alist (read in))
+           (table (make-hash-table :test test)))
+      (dolist (pair alist)
+        (setf (gethash (car pair) table) (cdr pair)))
+      table)))
+
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
   (hci-log-reset)
@@ -209,6 +229,26 @@
                    (when bonds-stash
                      (setf *bonds* bonds-stash)
                      (setf bonds-stash nil))))
+                (:load-bonds
+                 (let ((bond-filename (nth 1 cmd)))
+                   (log-inf "LOAD BONDS (path: ~A)" bond-filename)
+                   (ignore-errors
+                    (setf *bonds* (load-hash-table bond-filename))
+                    (log-inf "load ok"))
+                   ))
+                (:store-bonds
+                 (unless bonds-stash    ; do not overwrite real bonds with temp
+                   (let ((bond-filename (nth 1 cmd)))
+                     (log-inf "STORE BONDS (path: ~A)" bond-filename)
+                     (ignore-errors
+                      (save-hash-table *bonds* bond-filename)
+                      (log-inf "store ok"))
+                     )))
+                (:clear-bonds
+                 (progn
+                   (log-inf "CLEAR BONDS")
+                   (setf bonds-stash nil)
+                   (setf *bonds* (make-hash-table))))
 
                 (:discover-gatt
                  (let* ((conn-handle (nth 1 cmd))

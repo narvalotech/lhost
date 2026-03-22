@@ -146,7 +146,7 @@ export enum Command {
     conn-param-update,
     att-mtu,
     bond,
-    delete-bonds,
+    clear-bonds,
     stash-bonds,
     unstash-bonds,
     att-read,
@@ -226,7 +226,7 @@ export component AppWindow inherits Window {
                 {title: "Bond / re-encrypt", id: Command.bond},
                 {title: "Stash bonds", id: Command.stash-bonds},
                 {title: "Unstash bonds", id: Command.unstash-bonds},
-                {title: "Delete bonds", id: Command.delete-bonds},
+                {title: "Delete bonds", id: Command.clear-bonds},
             ],
         },
         {
