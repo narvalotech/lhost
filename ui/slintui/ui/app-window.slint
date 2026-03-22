@@ -152,10 +152,10 @@ export enum Command {
     att-read,
     att-write-cmd,
     att-write-req,
-    att-write-handle,
     att-read-own,
     att-write-own,
-    att-notify
+    att-notify,
+    data-entry-rsp,
 }
 
 struct MenuItemDesc {
@@ -188,9 +188,15 @@ export component AppWindow inherits Window {
     callback filter-scan-results(ScanFilter);
     out property <int> current-att-row;
     out property <string> current-att-handle;
-    in-out property <bool> is_dialog_open: false;
-    out property <string> gatt-write-text;
-    public function popup-gatt-write() {
+
+    out property <Command> data-entry-command;
+    property <string> data-entry-command-text;
+    property <string> data-entry-command-placeholder;
+    out property <string> data-entry-user-text;
+    public function popup-data-entry(cmd: Command, text: string, placeholder: string) {
+        data-entry-command = cmd;
+        data-entry-command-text = text;
+        data-entry-command-placeholder = placeholder;
         poptart.show();
     }
 
@@ -352,12 +358,12 @@ export component AppWindow inherits Window {
     }
 
     poptart := PopTart {
-        title: "GATT Write";
-        text: "Gatt Write";
-        placeholder: "GATT Write Data (e,g, 01 ef 32 c1)";
+        // title: "Data entry"; // Seems like "title" is not used
+        text: data-entry-command-text;
+        placeholder: data-entry-command-placeholder;
         entered(text) => {
-            root.gatt-write-text = text;
-            button(Command.att-write-handle);
+            root.data-entry-user-text = text;
+            button(Command.data-entry-rsp);
         }
     }
 }
