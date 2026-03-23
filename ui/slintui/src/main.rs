@@ -497,25 +497,3 @@ fn main() {
 
     start_server(false);
 }
-
-// Road to feature-parity
-// - scan
-//   - [x] scanned device view
-//   - [x] display merged AD
-//   - [x] sort by rssi / name
-//   - [x] filter addr/name
-//   - [x] deduplicate (in jrpc)
-// - connect
-//   - [x] log view (gatt operations)
-//   - [x] gatt listview
-//     - later: use tree https://github.com/slint-ui/slint/discussions/1042
-//   - [x] add/delete tab on connected/disconnected events
-//   - [x] encrypt / bond management
-// - gatt
-//   - [x] show own table
-//   - [x] discovery
-//   - [x] read/write
-//   - [x] notify
-// - misc
-//   - [x] real jsonrpc server
-//   - [ ] keyboard shortcuts

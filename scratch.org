@@ -6,17 +6,21 @@
 - focus new connection
 - focus prev tab on disconnect
 - auto-resize scan / gatt columns
+- show attribute properties in table (read/write/etc)
 - device selection / backend bar
 
 * feature ideas
-
 - discovery button
 - "stop ATT traffic" button / option
   - allows to e.g. do encryption fully before allowing discovery
   - already sort-of implemented for MITM
 - uuid name resolution (assigned numbers repo)
 
-* random code snippets
+* core
+- make proper ASDF packages
+- dedup code between ltk.lisp and utils.lisp
+- debug jsonrpc events not working on windows
 
+* random code snippets
 #+BEGIN_SRC lisp
 #+END_SRC
