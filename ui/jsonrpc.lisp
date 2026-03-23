@@ -113,7 +113,7 @@
 (defparameter *cmds* (make-mailbox "ui backend -> host"))
 (defparameter *evts* (make-mailbox "ui backend <- host"))
 (defvar backend-thread nil)
-(defparameter *bond-filename* "slintui-bonds")
+(defparameter *bond-filename* "bonds.txt")
 
 (defun handle-cmd (cmd &optional args)
   (case cmd
