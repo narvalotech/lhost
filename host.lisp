@@ -1013,6 +1013,9 @@
 (defparameter *bs-tx-path* "/tmp/bs_jon/myid/2G4.d0.dtp")
 (defparameter *h2c-path*   "/tmp/lhost/uart.h2c")
 (defparameter *c2h-path*   "/tmp/lhost/uart.c2h")
+(defparameter *fifo-paths*
+  (list :h2c *h2c-path*
+        :c2h *c2h-path*))
 
 ;; To use on a real device
 ;; socat -x /dev/ttyACM0,rawer,b115200 'GOPEN:/tmp/lhost/uart.h2c!!GOPEN:/tmp/lhost/uart.c2h'
@@ -1041,7 +1044,7 @@
            (progn ,@body)
            )))))
 
-(defmacro with-packetizer (instance h2c-path c2h-path &body body)
+(defmacro with-fifo-packetizer (instance h2c-path c2h-path &body body)
   (with-gensyms (h2c c2h)
     `(with-open-stream (,h2c (open-simplex-fd ,h2c-path t))
        (with-open-stream (,c2h (open-simplex-fd ,c2h-path nil))
@@ -3178,35 +3181,44 @@
    (lambda () (wait-for-signal stop-signal))
    :name "Server signal thread"))
 
-(defun start-hci (h2c-mailbox c2h-mailbox stop-signal)
+(defun packetizer-master-thread (packetizer stop-signal)
+  (let ((threads))
+    (unwind-protect
+         (progn
+           (push (receive-in-thread packetizer) threads)
+           (push (send-in-thread packetizer) threads)
+           (push (monitor-thread stop-signal) threads)
+           (ignore-errors
+            (loop until (find-if-not #'bt:thread-alive-p threads)
+                  do (sleep .5))))
+      (progn
+        (log-dbg (format nil "Killing threads: ~A" threads))
+        (mapc
+         (lambda (th) (ignore-errors
+                       (bt:destroy-thread th)))
+         threads)))
+    ))
+
+(defun start-hci (packetizer-path h2c-mailbox c2h-mailbox stop-signal)
   ;; First thing is to empty the mailboxes
   (loop while (drain-mailbox h2c-mailbox))
   (loop while (drain-mailbox c2h-mailbox))
 
   (bt:make-thread
    (lambda ()
-     ;; (with-packetizer packetizer *h2c-path* *c2h-path*
-     (with-serial-packetizer packetizer "/dev/ttyACM0"
-       (setf (getf packetizer :rx-mailbox) c2h-mailbox)
-       (setf (getf packetizer :tx-mailbox) h2c-mailbox)
+     (if (listp packetizer-path)
+         (with-fifo-packetizer
+             packetizer
+             (getf packetizer-path :h2c)
+             (getf packetizer-path :c2h)
+           (setf (getf packetizer :rx-mailbox) c2h-mailbox)
+           (setf (getf packetizer :tx-mailbox) h2c-mailbox)
+           (packetizer-master-thread packetizer stop-signal))
 
-       (let ((threads))
-         (unwind-protect
-              (progn
-                (push (receive-in-thread packetizer) threads)
-                (push (send-in-thread packetizer) threads)
-                (push (monitor-thread stop-signal) threads)
-                ;; todo monitor all threads
-                (ignore-errors
-                 (loop until (find-if-not #'bt:thread-alive-p threads)
-                       do (sleep .5))))
-           (progn
-             (log-dbg (format nil "Killing threads: ~A" threads))
-             (mapc
-              (lambda (th) (ignore-errors
-                            (bt:destroy-thread th)))
-              threads)))
-         )))
+         (with-serial-packetizer packetizer packetizer-path
+           (setf (getf packetizer :rx-mailbox) c2h-mailbox)
+           (setf (getf packetizer :tx-mailbox) h2c-mailbox)
+           (packetizer-master-thread packetizer stop-signal))))
    :name "Packetizer (HCI server) master thread"))
 
 (defun stop-hci (stop-signal)

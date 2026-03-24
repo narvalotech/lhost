@@ -293,10 +293,13 @@
         (setf (gethash (car pair) table) (cdr pair)))
       table)))
 
+(defvar *packetizer-path* *fifo-paths*)
+
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
   (list
    (start-hci
+    *packetizer-path*
     (getf *controller* :tx-mailbox)
     (getf *controller* :rx-mailbox)
     (getf *controller* :stop-signal))

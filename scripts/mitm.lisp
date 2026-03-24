@@ -1,7 +1,9 @@
 ;; Load host.lisp first
+(defvar *packetizer-path* "/dev/ttyACM0")
 
 (defparameter *controller* (make-controller))
 (start-hci
+ *packetizer-path*
  (getf *controller* :tx-mailbox)
  (getf *controller* :rx-mailbox)
  (getf *controller* :stop-signal))
