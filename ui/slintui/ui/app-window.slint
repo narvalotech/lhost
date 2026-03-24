@@ -200,10 +200,6 @@ export component AppWindow inherits Window {
     // Define the callback here so Rust can "see" it
     callback button(Command);
 
-    in-out property <string> log-text: "";
-    public function log-go-to-bottom() {
-        log-viewer.go-to-bottom();
-    }
     in-out property <[[StandardListViewItem]]> scan_results_storage;
     in-out property <[[StandardListViewItem]]> scan_results <=> results.device_rows;
 
@@ -405,16 +401,6 @@ export component AppWindow inherits Window {
                                 if (event.text == "W") {button(Command.att-write-cmd);}
                             }
                         }
-                    }
-                }
-
-                log-viewer:= TextEdit {
-                    min-height: 100px;
-                    read-only: true;
-                    wrap: no-wrap;
-                    text: root.log-text;
-                    function go-to-bottom() {
-                        self.viewport-y = min(0px, - self.viewport-height + self.visible-height);
                     }
                 }
             }
