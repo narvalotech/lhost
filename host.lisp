@@ -199,23 +199,6 @@
     (dolist (b bytes)
       (write-char (code-char b) s))))
 
-;;;;;;;;;;;;; babblesim PHY
-
-(defconstant PB_MSG_WAIT #x01)
-(defconstant PB_MSG_WAIT_END #x81)
-(defconstant PB_MSG_TERMINATE #xFFFE)
-(defconstant PB_MSG_DISCONNECT #xFFFF)
-
-(defun make-wait-cmd (us)
-  (append
-   (make-uint 4 PB_MSG_WAIT)
-   (make-uint 8 us)))
-
-(make-wait-cmd 10)
-
-(defun make-terminate-cmd ()
-  (make-uint 4 PB_MSG_TERMINATE))
-
 (defun read-bytes (bytes stream)
   (let ((b
           (if (equal bytes 1)
@@ -240,23 +223,6 @@
                   (open path :direction :output :if-exists :overwrite)
                   (open path :direction :input))))
     (make-simplex-raw-fd-stream file is-output)))
-
-(defun sim-wait (ms sim)
-  (let ((rx (getf sim :rx))
-        (tx (getf sim :tx))
-        (time (getf sim :time)))
-    (setf time (+ time (* ms 1000)))
-    (log-dbg (format nil "waiting until ~A us (delta ~A ms).." (getf sim :time) ms))
-
-    (write-sequence (make-wait-cmd time) tx)
-    (setf (getf sim :time) time)
-
-    (read-bytes 4 rx)
-    (log-dbg (format nil "done"))))
-
-(defun sim-terminate (sim)
-  (log-dbg (format nil "term"))
-  (write-sequence (make-terminate-cmd) (getf sim :tx)))
 
 ;;;;;;;;;;;;; HCI packet-building
 
@@ -1008,15 +974,6 @@
 
 ;;;;;;;;;;;;; script
 
-;; Run the REPL
-(defparameter *bs-rx-path* "/tmp/bs_jon/myid/2G4.d0.ptd")
-(defparameter *bs-tx-path* "/tmp/bs_jon/myid/2G4.d0.dtp")
-(defparameter *h2c-path*   "/tmp/lhost/uart.h2c")
-(defparameter *c2h-path*   "/tmp/lhost/uart.c2h")
-(defparameter *fifo-paths*
-  (list :h2c *h2c-path*
-        :c2h *c2h-path*))
-
 ;; To use on a real device
 ;; socat -x /dev/ttyACM0,rawer,b115200 'GOPEN:/tmp/lhost/uart.h2c!!GOPEN:/tmp/lhost/uart.c2h'
 ;;
@@ -1036,14 +993,6 @@
   `(let ,(loop for n in names collect `(,n (gensym)))
      ,@body))
 
-(defmacro with-bsim (instance rx-path tx-path &body body)
-  (with-gensyms (rx tx)
-    `(with-open-stream (,rx (open-simplex-fd ,rx-path nil))
-       (with-open-stream (,tx (open-simplex-fd ,tx-path t))
-         (let ((,instance (list :rx ,rx :tx ,tx :time 0)))
-           (progn ,@body)
-           )))))
-
 (defmacro with-fifo-packetizer (instance h2c-path c2h-path &body body)
   (with-gensyms (h2c c2h)
     `(with-open-stream (,h2c (open-simplex-fd ,h2c-path t))
@@ -1061,13 +1010,6 @@
             (,instance (make-hci-packetizer serial-stream serial-stream)))
        (progn ,@body)
        )))
-
-;; (with-bsim sim *bs-rx-path* *bs-tx-path*
-;;   (log-dbg (format nil "connected to PHY (rx ~A tx ~A)"
-;;           (sb-posix:file-descriptor (getf sim :rx))
-;;           (sb-posix:file-descriptor (getf sim :tx))))
-;;   (sim-wait 1000 sim)
-;;   (sim-terminate sim))
 
 (defun hci-send-cmd (hci cmd)
   "Send a command and check it's return status. Return status/params if no error."
