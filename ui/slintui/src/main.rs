@@ -1,7 +1,9 @@
 mod host_types;
 mod rpc;
+mod subprocess;
 use crate::host_types::*;
 use crate::rpc::LispClient;
+use crate::subprocess::{start_server, setup_cleanup_hooks};
 
 slint::include_modules!();
 use slint::{ModelRc, Model, SharedString, StandardListViewItem, FilterModel, VecModel};
@@ -267,17 +269,6 @@ async fn async_main(
     Ok(())
 }
 
-fn start_server(start: bool) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let command = if start { RemoteCommand::Open } else { RemoteCommand::Close };
-    rt.block_on(async {
-        info!("{} server", if start { "spawning" } else { "killing" });
-        let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
-        let rsp: String = client.call(RemoteMethod::Command(command)).await.unwrap();
-        info!("Lisp response {:?}", rsp);
-    });
-}
-
 fn main() {
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
@@ -510,7 +501,9 @@ fn main() {
     let bonded_devices = Rc::new(VecModel::<SharedString>::default());
     ui.set_bonded_devices(bonded_devices.clone().into());
 
-    start_server(true);
+    setup_cleanup_hooks();
+
+    let server_child = start_server(true, None);
 
     let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
@@ -519,5 +512,5 @@ fn main() {
     let _ = ui.show();
     slint::run_event_loop().unwrap();
 
-    start_server(false);
+    start_server(false, server_child);
 }

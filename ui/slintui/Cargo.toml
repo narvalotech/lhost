@@ -18,6 +18,10 @@ async-compat = "0.2.5"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
+ctrlc = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 slint-build = "1.14.1"
