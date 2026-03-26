@@ -399,6 +399,20 @@ fn main() {
                     error!("Unable to determine conn handle");
                 }
             }
+            Command::AttWriteCmd => {
+                if let Some(_) = get_focused_conn_handle(&ui_handle) {
+                    if let Some(_) = get_selected_att_handle(&ui_handle) {
+                        let ui = ui_handle.upgrade().unwrap();
+                        ui.invoke_popup_data_entry(Command::AttWriteCmd,
+                                                   "GATT Write (command)".into(),
+                                                   "GATT Write Data (e,g, 01 ef 32 c1)".into());
+                    } else {
+                        error!("Unable to determine ATT handle");
+                    }
+                } else {
+                    error!("Unable to determine conn handle");
+                }
+            }
             Command::AttNotify => {
                 if let Some(_) = get_selected_att_handle(&ui_handle) {
                     let ui = ui_handle.upgrade().unwrap();
@@ -420,6 +434,22 @@ fn main() {
                                 let cmd = RemoteCommand::AttWrite { conn: conn_handle,
                                                                     handle: att_handle,
                                                                     data: bytes, };
+                                tx_chan.blocking_send(cmd).unwrap();
+                            } else {
+                                error!("Unable to determine ATT handle");
+                            }
+                        } else {
+                            error!("Unable to determine conn handle");
+                        }
+                    }
+                    Command::AttWriteCmd => {
+                        if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
+                            if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
+
+                                let bytes = fromhex(ui.get_data_entry_user_text());
+                                let cmd = RemoteCommand::AttWriteCmd { conn: conn_handle,
+                                                                       handle: att_handle,
+                                                                       data: bytes, };
                                 tx_chan.blocking_send(cmd).unwrap();
                             } else {
                                 error!("Unable to determine ATT handle");

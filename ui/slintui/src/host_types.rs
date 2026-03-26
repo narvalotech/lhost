@@ -109,6 +109,7 @@ pub enum RemoteCommand {
     UnstashBonds,
     AttRead { conn: u16, handle: u16 },
     AttWrite { conn: u16, handle: u16, data: Vec<u8> },
+    AttWriteCmd { conn: u16, handle: u16, data: Vec<u8> },
     AttNotify { conn: u16, handle: u16, data: Vec<u8> },
 }
 

@@ -1860,21 +1860,22 @@
     (when handle
       (att-read hci conn handle))))
 
-(defun att-write (hci conn handle value)
+(defun att-write (hci conn handle value &optional no-rsp)
   ;; TODO: MTU checks, yada yada
   (log-dbg (format nil "WRITING ~X" handle))
   (att-send hci conn
-            (att-make-packet :write-req
+            (att-make-packet (if no-rsp :write-cmd :write-req)
                              (append
                               (make-c-int :u16 handle)
                               value)))
-  (let* ((rsp (att-receive hci conn :write-rsp))
-         (data (getf rsp :data)))
-    (when rsp
-      (log-dbg "WRITE RSP: ~X" rsp)
-      (if (att-error? (pull-int data :u8))
-          (log-dbg (format nil "ATT-WRITE-REQ ERROR: ~X" data))
-          data))))
+  (unless no-rsp
+    (let* ((rsp (att-receive hci conn :write-rsp))
+           (data (getf rsp :data)))
+      (when rsp
+        (log-dbg "WRITE RSP: ~X" rsp)
+        (if (att-error? (pull-int data :u8))
+            (log-dbg (format nil "ATT-WRITE-REQ ERROR: ~X" data))
+            data)))))
 
 (defun gattc-find-cccd-handle (table uuid value-handle)
   "Find the characteristic value handle of UUID"

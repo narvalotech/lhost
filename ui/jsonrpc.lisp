@@ -165,6 +165,11 @@
                    (gethash "conn" args)
                    (gethash "handle" args)
                    (coerce (gethash "data" args) 'list)))
+    (:att-write-cmd
+     (dispatch-cmd :att-write-cmd
+                   (gethash "conn" args)
+                   (gethash "handle" args)
+                   (coerce (gethash "data" args) 'list)))
     (:att-notify
      (dispatch-cmd :att-notify
                    (gethash "conn" args)
@@ -209,6 +214,8 @@
                          (handle-cmd :att-read (gethash "att_read" args)))
                         ((gethash "att_write" args)
                          (handle-cmd :att-write (gethash "att_write" args)))
+                        ((gethash "att_write_cmd" args)
+                         (handle-cmd :att-write-cmd (gethash "att_write_cmd" args)))
                         ((gethash "att_notify" args)
                          (handle-cmd :att-notify (gethash "att_notify" args)))
                         ))))

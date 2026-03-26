@@ -270,6 +270,12 @@
                        (data (nth 3 cmd)))
                    (log-inf "ATT WRITE")
                    (att-write hci conn-handle att-handle data)))
+                (:att-write-cmd
+                 (let ((conn-handle (nth 1 cmd))
+                       (att-handle (nth 2 cmd))
+                       (data (nth 3 cmd)))
+                   (log-inf "ATT WRITE CMD")
+                   (att-write hci conn-handle att-handle data t)))
                 (:att-notify
                  (let* ((conn-handle (nth 1 cmd))
                         (handle (nth 2 cmd))
