@@ -5,7 +5,6 @@
 - keyboard shortcuts
 - focus new connection
 - focus prev tab on disconnect
-- auto-resize scan / gatt columns
 - show attribute properties in table (read/write/etc)
 - device selection / backend bar
 - show "bonds" window
