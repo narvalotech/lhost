@@ -185,6 +185,7 @@ export component AppWindow inherits Window {
     in-out property <int> selected_device <=> results.current-row;
     in-out property <[DeviceData]> all-devices: [];
     in-out property <int> active-tab: 0;
+    in-out property<bool> scan-focused: true;
     in-out property <ScanFilter> scan-filter: {text: "", column: 1, ascending: false};
 
     callback filter-scan-results(ScanFilter);
@@ -276,7 +277,6 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 10px;
                 spacing: 10px;
-                property<bool> scan-focused: true;
                 property<bool> gatt-server-focused: false;
 
                 VerticalBox {
@@ -286,7 +286,7 @@ export component AppWindow inherits Window {
                         Button {
                             text: "GATT server";
                             clicked => {
-                                scan-focused = false;
+                                root.scan-focused = false;
                                 gatt-server-focused = true;
                             }
                         }
@@ -294,14 +294,14 @@ export component AppWindow inherits Window {
                         Button {
                             text: "Scan results";
                             clicked => {
-                                scan-focused = true;
+                                root.scan-focused = true;
                                 gatt-server-focused = false;
                             }
                         }
 
                         for device[i] in root.all-devices : Button {
                             text: device.address;
-                            clicked => { root.active-tab = i+1; scan-focused = false; gatt-server-focused = false; }
+                            clicked => { root.active-tab = i+1; root.scan-focused = false; gatt-server-focused = false; }
                         }
                     }
 
@@ -310,7 +310,7 @@ export component AppWindow inherits Window {
                         min-width: 800px;
 
                         VerticalBox {
-                            visible: scan-focused;
+                            visible: root.scan-focused;
 
                             LineEdit {
                                 placeholder-text: "Device filter (name/address)";
@@ -341,7 +341,7 @@ export component AppWindow inherits Window {
 
                         for device[i] in root.all-devices : GattView {
                             data: device;
-                            visible: (root.active-tab == i+1) && !scan-focused && !gatt-server-focused;
+                            visible: (root.active-tab == i+1) && !root.scan-focused && !gatt-server-focused;
                             row-changed(index) => {
                                 root.current-att-row = index;
                                 root.current-att-handle = device.gatt[index][0].text;

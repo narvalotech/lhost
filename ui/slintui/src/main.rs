@@ -63,9 +63,14 @@ fn ui_update_devices(devices: &Vec<PeerDevice>, ui_handle: &slint::Weak<AppWindo
             let device_list = ui.get_all_devices();
             let the_model = device_list.as_any().downcast_ref::<VecModel<DeviceData>>().expect("Wrong type");
             the_model.clear();
+            let num_devs = devs.len();
             for dev in devs {
                 the_model.push(device_to_device_data(&dev));
             }
+
+            // Focus the right tab
+            ui.set_active_tab(num_devs as i32);
+            ui.set_scan_focused(num_devs == 0);
         })
         .unwrap();
 }

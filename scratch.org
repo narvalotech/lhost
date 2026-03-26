@@ -3,8 +3,6 @@
 * missing ui/ux
 ** slint
 - keyboard shortcuts
-- focus new connection
-- focus prev tab on disconnect
 - show attribute properties in table (read/write/etc)
 - device selection / backend bar
 - show "bonds" window
