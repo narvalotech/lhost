@@ -9,6 +9,7 @@
   - show gap name + address + LTK
   - filter adv by bonded
 - cache write/nfy data in UI
+- show advertising data on hover
 
 * feature ideas
 - discovery button
