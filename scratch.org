@@ -31,6 +31,12 @@
 #+BEGIN_SRC lisp
 #+END_SRC
 
+* slint bugs
+- resizing a column makes other columns expand wrong way
+  - repro'd on slintpad demo
+- very very slow textview on windows
+  - was fixed a few days ago upstream
+
 * resources
 [[https://docs.rs/subprocess/latest/subprocess/][subprocess]]
 [[https://doc.rust-lang.org/std/process/struct.Command.html][command]]
