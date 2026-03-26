@@ -30,3 +30,9 @@
 * random code snippets
 #+BEGIN_SRC lisp
 #+END_SRC
+
+* resources
+[[https://docs.rs/subprocess/latest/subprocess/][subprocess]]
+[[https://doc.rust-lang.org/std/process/struct.Command.html][command]]
+[[https://docs.rs/process-wrap/latest/process_wrap/][process_wrap]]
+[[https://gist.github.com/Technius/43977937a28e8846d917b53605e32cc3][using tokio]]
