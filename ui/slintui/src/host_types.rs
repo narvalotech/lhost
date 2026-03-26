@@ -100,6 +100,7 @@ pub enum RemoteCommand {
     Close,
     StartScan,
     StopScan,
+    ClearScan,
     Connect { address: Address },
     Disconnect { conn: u16 },
     Bond { conn: u16 },

@@ -115,6 +115,8 @@
 (defvar backend-thread nil)
 (defparameter *bond-filename* "bonds.txt")
 
+(defparameter *scanned-devices* (make-hash-table))
+
 (defun handle-cmd (cmd &optional args)
   (case cmd
     (:open
@@ -141,6 +143,8 @@
        (dispatch-cmd :store-bonds (format nil "~A.bak" *bond-filename*))
        (dispatch-cmd :clear-bonds *bond-filename*)
        (dispatch-cmd :store-bonds *bond-filename*)))
+    (:clear-scan
+     (clrhash *scanned-devices*))
 
     (:connect
      (let ((address
@@ -183,6 +187,8 @@
                          (handle-cmd :start-scan))
                         ((string= "stop_scan" args)
                          (handle-cmd :stop-scan))
+                        ((string= "clear_scan" args)
+                         (handle-cmd :clear-scan))
 
                         ((string= "clear_bonds" args)
                          (handle-cmd :clear-bonds))
@@ -208,7 +214,6 @@
                         ))))
 
 ;; TODO: make a "device" hashtable and clear it on start
-(defparameter *scanned-devices* (make-hash-table))
 (defparameter *last-scan-display* (get-internal-real-time))
 
 (defun evt->json (evt)

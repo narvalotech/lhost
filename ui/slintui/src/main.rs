@@ -324,6 +324,15 @@ fn main() {
                 let cmd = RemoteCommand::StopScan;
                 tx_chan.blocking_send(cmd).unwrap();
             }
+            Command::ClearScan => {
+                let ui = ui_handle.upgrade().unwrap();
+                let model = ui.get_scan_results_storage();
+                let the_model = model.as_any().downcast_ref::<VecModel<ModelRc<StandardListViewItem>>>()
+                    .expect("Wrong row type");
+                the_model.clear();
+                let cmd = RemoteCommand::ClearScan;
+                tx_chan.blocking_send(cmd).unwrap();
+            }
             Command::Connect => {
                 if let Some(address) = get_current_row(&ui_handle) {
                     let cmd = RemoteCommand::Connect { address };
