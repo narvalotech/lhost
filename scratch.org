@@ -8,6 +8,11 @@
 - auto-resize scan / gatt columns
 - show attribute properties in table (read/write/etc)
 - device selection / backend bar
+- show "bonds" window
+  - show gap name + address + LTK
+  - filter adv by bonded
+- cache write/nfy data in UI
+- case-insensitive scan filter
 
 * feature ideas
 - discovery button
@@ -20,6 +25,8 @@
 - make proper ASDF packages
 - dedup code between ltk.lisp and utils.lisp
 - debug jsonrpc events not working on windows
+- make option to run as subprocess
+- figure out how to send evts to UI in synchronous host commands
 
 * random code snippets
 #+BEGIN_SRC lisp
