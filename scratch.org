@@ -9,7 +9,6 @@
   - show gap name + address + LTK
   - filter adv by bonded
 - cache write/nfy data in UI
-- case-insensitive scan filter
 
 * feature ideas
 - discovery button

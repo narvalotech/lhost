@@ -495,15 +495,15 @@ fn main() {
     ui.on_filter_scan_results(move |filter| {
         let col_index = filter.column;
         let ascending = filter.ascending;
-        let text = filter.text;
+        let text = filter.text.to_lowercase();
 
         let ui = ui_handle.unwrap();
         let base_model = base_model_handle.clone();
 
         let filtered_model = FilterModel::new(base_model, move |row| {
             let filter = text.as_str();
-            let address = row.row_data(0).map(|i| i.text).unwrap_or_default();
-            let name = row.row_data(2).map(|i| i.text).unwrap_or_default();
+            let address = row.row_data(0).map(|i| i.text).unwrap_or_default().to_lowercase();
+            let name = row.row_data(2).map(|i| i.text).unwrap_or_default().to_lowercase();
             address.contains(filter) || name.contains(filter)
         });
 
