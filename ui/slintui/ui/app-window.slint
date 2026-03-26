@@ -74,60 +74,51 @@ component PopTart inherits PopupWindow {
     in property <string> placeholder: "Default placeholder";
     out property <string> result <=> le.text;
     callback entered(string);
+    forward-focus: le;
 
     close-policy: close-on-click-outside;
 
-    // calling this from main window is not possible for some reason
-    function open () {
-        root.show();
-        pf.focus();
-    }
+    Dialog {
+        title: title;
 
-    pf := FocusScope {
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.close();
-                return accept;
+        VerticalBox {
+            padding: 10px;
+            spacing: 10px;
+
+            Text {
+                text: text;
             }
-            if (event.text == Key.Return) {
-                debug("Confirmed via Enter!");
-                root.close();
-                entered(result);
-                return accept;
+
+            le := LineEdit {
+                placeholder-text: placeholder;
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.close();
+                        return accept;
+                    }
+                    if (event.text == Key.Return) {
+                        root.close();
+                        entered(result);
+                        return accept;
+                    }
+                    reject
+                }
             }
-            reject
         }
 
-        Dialog {
-            title: title;
-
-            VerticalBox {
-                padding: 10px;
-                spacing: 10px;
-
-                Text {
-                    text: text;
-                }
-
-                le := LineEdit {
-                    placeholder-text: placeholder;
-                }
+        StandardButton {
+            kind: ok;
+            primary: true;
+            clicked => {
+                root.close();
+                entered(result);
             }
+        }
 
-            StandardButton {
-                kind: ok;
-                primary: true;
-                clicked => {
-                    root.close();
-                    entered(result);
-                }
-            }
-
-            StandardButton {
-                kind: cancel;
-                clicked => {
-                    root.close();
-                }
+        StandardButton {
+            kind: cancel;
+            clicked => {
+                root.close();
             }
         }
     }
