@@ -20,7 +20,6 @@
 * core
 - make proper ASDF packages
 - dedup code between ltk.lisp and utils.lisp
-- debug jsonrpc events not working on windows
 - make option to run as subprocess
 - figure out how to send evts to UI in synchronous host commands
 
