@@ -537,7 +537,8 @@ fn main() {
     let slint_future = async_main(rx_chan, ui_handle);
     slint::spawn_local(async_compat::Compat::new(slint_future)).unwrap();
 
-    ui.run().unwrap();
+    let _ = ui.show();
+    slint::run_event_loop().unwrap();
 
     start_server(false);
 }
