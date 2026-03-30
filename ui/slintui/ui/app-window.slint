@@ -63,74 +63,8 @@ component GattView inherits Rectangle {
     }
 }
 
-component PopTart inherits PopupWindow {
-    x: (root.width - self.width) / 2;
-    y: (root.height - self.height) / 2;
-    width: 300px;
-    height: 300px;
-
-    in property <string> title: "Default title";
-    in property <string> text: "Default text";
-    in property <string> placeholder: "Default placeholder";
-    out property <string> result <=> le.text;
-    callback entered(string);
-    forward-focus: le;
-
-    close-policy: close-on-click-outside;
-
-    Dialog {
-        title: title;
-
-        VerticalBox {
-            padding: 10px;
-            spacing: 10px;
-
-            Text {
-                text: text;
-            }
-
-            le := LineEdit {
-                placeholder-text: placeholder;
-                key-pressed(event) => {
-                    if (event.text == Key.Escape) {
-                        root.close();
-                        return accept;
-                    }
-                    if (event.text == Key.Return) {
-                        root.close();
-                        entered(result);
-                        return accept;
-                    }
-                    reject
-                }
-            }
-        }
-
-        StandardButton {
-            kind: ok;
-            primary: true;
-            clicked => {
-                root.close();
-                entered(result);
-            }
-        }
-
-        StandardButton {
-            kind: cancel;
-            clicked => {
-                root.close();
-            }
-        }
-    }
-}
-
-export struct ScanFilter {
-    text: string,
-    column: int,
-    ascending: bool,
-}
-
 export enum Command {
+    nop,
     start-scan,
     stop-scan,
     clear-scan,
@@ -149,6 +83,90 @@ export enum Command {
     att-write-own,
     att-notify,
     data-entry-rsp,
+}
+
+export component PopTart inherits Dialog {
+    forward-focus: le;
+    // bug: the window only auto-sizes on the second show
+    max-height: 300px;
+    max-width: 400px;
+
+    property <string> placeholder: "Default placeholder";
+
+    // User context
+    property <Command> command;
+    property <int> conn;
+    property <int> handle;
+
+    // Output
+    property <string> result <=> le.text;
+
+    // A limitation of current slint:
+    // Windows cannot be shown or hidden from slint functions,
+    // it has to come from the backend code.
+    public function setup-data-entry(
+        cmd: Command,
+        conn: int,
+        handle: int,
+        text: string,
+        placeholder: string) {
+        root.command = cmd;
+        root.title = text;
+        root.placeholder = placeholder;
+        // User context
+        // TODO: figure out how to smuggle generic data
+        root.conn = conn;
+        root.handle = handle;
+    }
+
+    callback data-entered(Command, int, int, string);
+    function entered(data: string) {
+        data-entered(root.command, root.conn, root.handle, data);
+    }
+    function not-entered() {
+        data-entered(Command.nop, root.conn, root.handle, "");
+    }
+
+    VerticalBox {
+        padding: 10px;
+        spacing: 10px;
+
+        le := LineEdit {
+            placeholder-text: placeholder;
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    not-entered();
+                    return accept;
+                }
+                if (event.text == Key.Return) {
+                    entered(result);
+                    return accept;
+                }
+                reject
+            }
+        }
+    }
+
+    StandardButton {
+        kind: ok;
+        primary: true;
+        clicked => {
+            entered(result);
+        }
+    }
+
+    StandardButton {
+        kind: cancel;
+        clicked => {
+            not-entered();
+        }
+    }
+}
+
+export struct ScanFilter {
+    text: string,
+    column: int,
+    ascending: bool,
 }
 
 struct MenuItemDesc {
@@ -187,12 +205,6 @@ export component AppWindow inherits Window {
     property <string> data-entry-command-text;
     property <string> data-entry-command-placeholder;
     out property <string> data-entry-user-text;
-    public function popup-data-entry(cmd: Command, text: string, placeholder: string) {
-        data-entry-command = cmd;
-        data-entry-command-text = text;
-        data-entry-command-placeholder = placeholder;
-        poptart.show();
-    }
 
     property <[MenuItemDesc]> buttons : [
         {title: "Start scan", id: Command.start-scan},
@@ -351,16 +363,6 @@ export component AppWindow inherits Window {
                     }
                 }
             }
-        }
-    }
-
-    poptart := PopTart {
-        // title: "Data entry"; // Seems like "title" is not used
-        text: data-entry-command-text;
-        placeholder: data-entry-command-placeholder;
-        entered(text) => {
-            root.data-entry-user-text = text;
-            button(Command.data-entry-rsp);
         }
     }
 }

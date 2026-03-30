@@ -314,10 +314,49 @@ fn main() {
 
     let ui = AppWindow::new().unwrap();
 
-    let (tx_chan, rx_chan) = mpsc::channel(10);
+    let (tx_chan_src, rx_chan) = mpsc::channel(10);
+
+    // setup the data-entry popup window
+    let pw = PopTart::new().unwrap();
+
+    // Set up button commands
+    let pw_handle = pw.as_weak();
+    let tx_chan = tx_chan_src.clone();
+    pw.on_data_entered(move |cmd, conn, handle, data| {
+        match cmd {
+            Command::AttWriteReq => {
+                let bytes = fromhex(data);
+                let cmd = RemoteCommand::AttWrite { conn: conn as u16,
+                                                    handle: handle as u16,
+                                                    data: bytes, };
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            Command::AttWriteCmd => {
+                let bytes = fromhex(data);
+                let cmd = RemoteCommand::AttWriteCmd { conn: conn as u16,
+                                                       handle: handle as u16,
+                                                       data: bytes, };
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            Command::AttNotify => {
+                let bytes = fromhex(data);
+                let cmd = RemoteCommand::AttNotify { conn: 0,
+                                                     handle: handle as u16,
+                                                     data: bytes, };
+                tx_chan.blocking_send(cmd).unwrap();
+            }
+            _ => {
+                error!("unhandled data entry cmd: {:?}", cmd);
+            }
+        }
+        let pw = pw_handle.upgrade().unwrap();
+        let _ = pw.hide();
+    });
 
     // Set up button commands
     let ui_handle = ui.as_weak();
+    let pw_handle = pw.as_weak();
+    let tx_chan = tx_chan_src.clone();
     ui.on_button(move |id| {
         info!("CALLBACK: {:?}", id);
         match id {
@@ -391,12 +430,15 @@ fn main() {
                 }
             }
             Command::AttWriteReq => {
-                if let Some(_) = get_focused_conn_handle(&ui_handle) {
-                    if let Some(_) = get_selected_att_handle(&ui_handle) {
-                        let ui = ui_handle.upgrade().unwrap();
-                        ui.invoke_popup_data_entry(Command::AttWriteReq,
+                if let Some(conn) = get_focused_conn_handle(&ui_handle) {
+                    if let Some(handle) = get_selected_att_handle(&ui_handle) {
+                        let pw = pw_handle.upgrade().unwrap();
+                        pw.invoke_setup_data_entry(Command::AttWriteReq,
+                                                   conn.into(),
+                                                   handle.into(),
                                                    "GATT Write".into(),
                                                    "GATT Write Data (e,g, 01 ef 32 c1)".into());
+                        let _ = pw.show();
                     } else {
                         error!("Unable to determine ATT handle");
                     }
@@ -405,12 +447,15 @@ fn main() {
                 }
             }
             Command::AttWriteCmd => {
-                if let Some(_) = get_focused_conn_handle(&ui_handle) {
-                    if let Some(_) = get_selected_att_handle(&ui_handle) {
-                        let ui = ui_handle.upgrade().unwrap();
-                        ui.invoke_popup_data_entry(Command::AttWriteCmd,
+                if let Some(conn) = get_focused_conn_handle(&ui_handle) {
+                    if let Some(handle) = get_selected_att_handle(&ui_handle) {
+                        let pw = pw_handle.upgrade().unwrap();
+                        pw.invoke_setup_data_entry(Command::AttWriteCmd,
+                                                   conn.into(),
+                                                   handle.into(),
                                                    "GATT Write (command)".into(),
                                                    "GATT Write Data (e,g, 01 ef 32 c1)".into());
+                        let _ = pw.show();
                     } else {
                         error!("Unable to determine ATT handle");
                     }
@@ -419,66 +464,17 @@ fn main() {
                 }
             }
             Command::AttNotify => {
-                if let Some(_) = get_selected_att_handle(&ui_handle) {
-                    let ui = ui_handle.upgrade().unwrap();
-                    ui.invoke_popup_data_entry(Command::AttNotify,
+                if let Some(handle) = get_selected_att_handle(&ui_handle) {
+                    let pw = pw_handle.upgrade().unwrap();
+                    pw.invoke_setup_data_entry(Command::AttNotify,
+                                               0,
+                                               handle.into(),
                                                "GATT Notify".into(),
                                                "GATT Notify Data (e,g, 01 ef 32 c1)".into());
+                    let _ = pw.show();
                 } else {
                     error!("Unable to determine ATT handle");
                 }
-            }
-            Command::DataEntryRsp => {
-                let ui = ui_handle.upgrade().unwrap();
-                let cmd = ui.get_data_entry_command();
-                match cmd {
-                    Command::AttWriteReq => {
-                        if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
-                            if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
-                                let bytes = fromhex(ui.get_data_entry_user_text());
-                                let cmd = RemoteCommand::AttWrite { conn: conn_handle,
-                                                                    handle: att_handle,
-                                                                    data: bytes, };
-                                tx_chan.blocking_send(cmd).unwrap();
-                            } else {
-                                error!("Unable to determine ATT handle");
-                            }
-                        } else {
-                            error!("Unable to determine conn handle");
-                        }
-                    }
-                    Command::AttWriteCmd => {
-                        if let Some(conn_handle) = get_focused_conn_handle(&ui_handle) {
-                            if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
-
-                                let bytes = fromhex(ui.get_data_entry_user_text());
-                                let cmd = RemoteCommand::AttWriteCmd { conn: conn_handle,
-                                                                       handle: att_handle,
-                                                                       data: bytes, };
-                                tx_chan.blocking_send(cmd).unwrap();
-                            } else {
-                                error!("Unable to determine ATT handle");
-                            }
-                        } else {
-                            error!("Unable to determine conn handle");
-                        }
-                    }
-                    Command::AttNotify => {
-                            if let Some(att_handle) = get_selected_att_handle(&ui_handle) {
-                                let bytes = fromhex(ui.get_data_entry_user_text());
-                                let cmd = RemoteCommand::AttNotify { conn: 0,
-                                                                     handle: att_handle,
-                                                                     data: bytes, };
-                                tx_chan.blocking_send(cmd).unwrap();
-                            } else {
-                                error!("Unable to determine ATT handle");
-                            }
-                        }
-                    _ => {
-                        error!("unhandled data entry cmd: {:?}", cmd);
-                    }
-                }
-
             }
             _ => {
                 info!("UNHANDLED");
