@@ -258,6 +258,8 @@
                  (let* ((conn-handle (nth 1 cmd))
                         (gattc-table (gattc-discover hci conn-handle)))
                    (setf *latest-gattc-table* gattc-table)
+                   (log-dbg "DISCOVERED: ~A"
+                            (gattc-print gattc-table))
                    (queue ui-events (list :gatt-discovery-end
                                           conn-handle
                                           gattc-table))))
