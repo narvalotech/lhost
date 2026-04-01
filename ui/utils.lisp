@@ -153,6 +153,7 @@
       table)))
 
 (defvar *packetizer-path* *fifo-paths*)
+(defvar *latest-gattc-table* nil)
 
 (defun start-backend (ui-events)
   (setf *controller* (make-controller))
@@ -256,6 +257,7 @@
                 (:discover-gatt
                  (let* ((conn-handle (nth 1 cmd))
                         (gattc-table (gattc-discover hci conn-handle)))
+                   (setf *latest-gattc-table* gattc-table)
                    (queue ui-events (list :gatt-discovery-end
                                           conn-handle
                                           gattc-table))))
