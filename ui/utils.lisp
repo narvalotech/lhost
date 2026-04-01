@@ -238,7 +238,7 @@
                    (log-inf "LOAD BONDS (path: ~A)" bond-filename)
                    (ignore-errors
                     (setf *bonds* (load-hash-table bond-filename))
-                    (log-inf "load ok"))
+                    (log-inf "load ok: ~X" (bonds->list *bonds*)))
                    ))
                 (:store-bonds
                  (unless bonds-stash    ; do not overwrite real bonds with temp

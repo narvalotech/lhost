@@ -2881,6 +2881,14 @@
    (gethash (bond-address bond) *bonds*)
    bond))
 
+(defun bonds->list (bonds-hashmap)
+  (let ((bonds-list))
+    (maphash (lambda (k v)
+               (declare (ignore k))
+               (push v bonds-list))
+             bonds-hashmap)
+    bonds-list))
+
 (defun make-bond (address ltk)
   (list :peer address
         :ltk ltk))
