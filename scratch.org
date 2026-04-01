@@ -8,7 +8,6 @@
 - show "bonds" window
   - show gap name + address + LTK
   - filter adv by bonded
-- cache write/nfy data in UI
 - show advertising data on hover
 
 * feature ideas
@@ -23,6 +22,7 @@
 - dedup code between ltk.lisp and utils.lisp
 - make option to run as subprocess
 - figure out how to send evts to UI in synchronous host commands
+  - eg ui will not get "disconnected" event if we're waiting on cmd rsp
 
 * random code snippets
 #+BEGIN_SRC lisp
@@ -33,6 +33,7 @@
   - repro'd on slintpad demo
 - very very slow textview on windows
   - was fixed a few days ago upstream
+- window with dialog opens only auto-sizes on second open/show
 
 * resources
 [[https://docs.rs/subprocess/latest/subprocess/][subprocess]]
