@@ -263,7 +263,12 @@
                  (let* ((conn-handle (nth 1 cmd))
                         (att-handle (nth 2 cmd))
                         (data (att-read hci conn-handle att-handle)))
-                   (log-inf "ATT READ: ~X" data)))
+                   (log-inf "ATT READ: ~X" data)
+                   (queue ui-events (list :att-read-rsp
+                                          conn-handle
+                                          att-handle
+                                          data))
+                   ))
                 (:att-write
                  (let ((conn-handle (nth 1 cmd))
                        (att-handle (nth 2 cmd))

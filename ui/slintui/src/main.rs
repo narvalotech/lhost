@@ -44,7 +44,7 @@ fn device_to_device_data(device: &PeerDevice) -> DeviceData { // wow what a bad 
                 StandardListViewItem::from(SharedString::from(&handle)),
                 StandardListViewItem::from(SharedString::from(&attt)),
                 StandardListViewItem::from(SharedString::from(&uuid)),
-                StandardListViewItem::from(SharedString::from("")),
+                StandardListViewItem::from(SharedString::from(&att.value)),
             ]))));
     }
 

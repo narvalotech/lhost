@@ -19,6 +19,12 @@
       uuid
       0))
 
+(defun format-properties (attribute)
+  (let ((properties (getf attribute :properties)))
+    (if properties
+        (format nil "~A" (read-props properties))
+        "")))
+
 (defun gatt->json (gatt-table)
   (list (cons "attributes"
               (coerce
@@ -28,7 +34,8 @@
                       (cons "handle" (getf attribute :handle))
                       (cons "att_type" (make-att-ribute-type (getf attribute :type)))
                       (cons "uuid16" (uuid16 (getf attribute :uuid)))
-                      (cons "uuid128" (uuid128 (getf attribute :uuid)))))
+                      (cons "uuid128" (uuid128 (getf attribute :uuid)))
+                      (cons "value" (format-properties attribute))))
                'vector))))
 
 (gatt->json *gatts-table*)
@@ -109,6 +116,9 @@
                     (cons "handle" #xFFFF)
                     (cons "data" #())
                     (cons "repr" repr)))))
+
+(defun fake-att-read-rsp (handle data)
+  (list :op :att-read-rsp (append (make-c-int :u16 handle) data)))
 
 (defparameter *cmds* (make-mailbox "ui backend -> host"))
 (defparameter *evts* (make-mailbox "ui backend <- host"))
@@ -239,6 +249,11 @@
      (let* ((conn-handle (nth 1 evt))
             (table (nth 2 evt)))
        (make-client-discovered conn-handle table)))
+
+    (:att-read-rsp
+     (let* ((att-handle (nth 2 evt))
+            (data (nth 3 evt)))
+       (make-att-event (format nil "~X" (fake-att-read-rsp att-handle data)))))
 
     (:evt
      (case (car (cadr evt))

@@ -28,6 +28,7 @@ pub struct Attribute {
     pub att_type: AttType,
     pub uuid16: u16,
     pub uuid128: u128,
+    pub value: String,
 }
 
 #[derive(Serialize, Deserialize, Default, Constructor, Clone, Debug)]

@@ -3,7 +3,6 @@
 * missing ui/ux
 ** slint
 - keyboard shortcuts
-- show attribute properties in table (read/write/etc)
 - device selection / backend bar
 - show "bonds" window
   - show gap name + address + LTK
@@ -40,3 +39,6 @@
 [[https://doc.rust-lang.org/std/process/struct.Command.html][command]]
 [[https://docs.rs/process-wrap/latest/process_wrap/][process_wrap]]
 [[https://gist.github.com/Technius/43977937a28e8846d917b53605e32cc3][using tokio]]
+
+[[https://github.com/slint-ui/slint/issues/4031][multiwindow]] [[https://slint.dev/blog/slint-1.7-released][example]]
+[[https://github.com/slint-ui/slint/issues/4438][popupwindow problems]]
