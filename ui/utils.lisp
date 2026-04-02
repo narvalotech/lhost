@@ -158,6 +158,7 @@
                 (:init
                  (log-inf "INIT CONTROLLER")
                  (init-controller hci)
+                 (log-inf (gattc-print *gatts-table*))
                  (queue ui-events
                         (list :gatt-server-table
                               *gatts-table*)))
