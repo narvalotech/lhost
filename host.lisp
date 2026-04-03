@@ -2013,13 +2013,13 @@
 (make-props '(:read :write :notify))
  ; => 26 (5 bits, #x1A, #o32, #b11010)
 
-(defun read-props (encoded)
+(defun decode-props (encoded)
   (loop for pos from 0 to 7
         when (logbitp pos encoded)
         collect
              (nth pos +gatt-characteristic-properties+)))
 
-(read-props #b11010)
+(decode-props #b11010)
  ; => (:READ :WRITE :NOTIFY)
 
 (gatts-make-char-decl

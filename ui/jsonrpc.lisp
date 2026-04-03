@@ -22,7 +22,7 @@
 (defun format-properties (attribute)
   (let ((properties (getf attribute :properties)))
     (if properties
-        (format nil "~A" (read-props properties))
+        (format nil "~A" (decode-props properties))
         "")))
 
 (defun gatt->json (gatt-table)
