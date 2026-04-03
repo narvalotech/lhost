@@ -1,4 +1,6 @@
-;; eval host.lisp first
+(require 'asdf)
+(require :host)
+(in-package :host)
 
 (defun make-a-sign (byte)
   (if (logbitp 7 byte)
@@ -152,7 +154,7 @@
         (setf (gethash (car pair) table) (cdr pair)))
       table)))
 
-(defvar *packetizer-path* *fifo-paths*)
+(defvar *packetizer-path* "")
 (defvar *latest-gattc-table* nil)
 
 (defun start-backend (ui-events)

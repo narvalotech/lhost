@@ -1,3 +1,5 @@
+(in-package :host)
+
 (defparameter *h2c-path*   "/tmp/lhost/uart.h2c")
 (defparameter *c2h-path*   "/tmp/lhost/uart.c2h")
 (defparameter *fifo-paths*

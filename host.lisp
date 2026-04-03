@@ -1,11 +1,22 @@
+;; deps
+(require 'asdf)
+(require :local-time)
+(require :bordeaux-threads)
+(require :sb-concurrency)
+(require :sb-posix)
+(require :cserial-port)
+(require :ironclad)
+
+(defpackage :host
+  (:use :common-lisp))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (in-package :host))
+
+;; get'em debug frames
 (declaim (optimize (debug 3)))
 
-(require 'sb-posix)
-
 ;;;;;;;;;;;;; logging
-
-(ql:quickload :local-time)
-(ql:quickload :bordeaux-threads)
 
 (defparameter *log-levels*
   '(:tra (5 "TRAC")
@@ -59,58 +70,59 @@
 
 (defconstant +u64-max+ (ldb (byte 64 0) -1))
 
-(defun make-range (max)
-  (loop for number from 0 to (- max 1) collect number))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun make-range (max)
+    (loop for number from 0 to (- max 1) collect number))
 
-(defun make-be-range (max)
-  (loop for number from (- max 1) downto 0 collect number))
+  (defun make-be-range (max)
+    (loop for number from (- max 1) downto 0 collect number))
 
-(defun extract-byte (number index)
-  (ldb (byte 8 (* index 8)) number))
+  (defun extract-byte (number index)
+    (ldb (byte 8 (* index 8)) number))
 
-(defun make-uint (octets number &optional big-endian)
-  (loop for pos in (if big-endian
-                       (make-be-range octets)
-                       (make-range octets))
-        collect (extract-byte number pos)))
+  (defun make-uint (octets number &optional big-endian)
+    (loop for pos in (if big-endian
+                         (make-be-range octets)
+                         (make-range octets))
+          collect (extract-byte number pos)))
 
-(make-uint 4 8000)
- ; => (64 31 0 0)
+  ;; (make-uint 4 8000)
+  ; => (64 31 0 0)
 
-(make-uint 4 8000 t)
- ; => (0 0 31 64)
+  ;; (make-uint 4 8000 t)
+  ; => (0 0 31 64)
 
-(defun u2b (type)
-  (case type
-    (:u8 1)
-    (:u16 2)
-    (:u32 4)
-    (:u64 8)
-    (:u128 16)))
+  (defun u2b (type)
+    (case type
+      (:u8 1)
+      (:u16 2)
+      (:u32 4)
+      (:u64 8)
+      (:u128 16)))
 
-(defun custom-type (type)
-  (case type
-    (:bt-addr 6)))
+  (defun custom-type (type)
+    (case type
+      (:bt-addr 6)))
 
-(defun type->octets (type)
-  (let ((octets))
-    (setf octets (u2b type))
+  (defun type->octets (type)
+    (let ((octets))
+      (setf octets (u2b type))
 
-    (if (not octets)
-        (setf octets (custom-type type)))
+      (if (not octets)
+          (setf octets (custom-type type)))
 
-    (if (not octets)
-        (error "unknown type ~A" type))
+      (if (not octets)
+          (error "unknown type ~A" type))
 
-    octets))
+      octets))
 
-(type->octets :u32)
- ; => 4 (3 bits, #x4, #o4, #b100)
-(type->octets :bt-addr)
- ; => 6 (3 bits, #x6, #o6, #b110)
+  ;; (type->octets :u32)
+  ; => 4 (3 bits, #x4, #o4, #b100)
+  ;; (type->octets :bt-addr)
+  ; => 6 (3 bits, #x6, #o6, #b110)
 
-(defun make-c-int (type value &optional big-endian)
-  (make-uint (type->octets type) value big-endian))
+  (defun make-c-int (type value &optional big-endian)
+    (make-uint (type->octets type) value big-endian)))
 
 (make-c-int :u8 #xFF)
  ; => (255)
@@ -795,9 +807,6 @@
                 (delete-if predicate (getf hci :rxq)))
           packet))))
 
-(require 'sb-concurrency)
-(ql:quickload :bordeaux-threads)
-
 (defun make-signal ()
   (sb-concurrency:make-gate))
 
@@ -861,9 +870,7 @@
   (loop until (sb-concurrency:mailbox-empty-p (getf hci :rx-mailbox)) do
     (wait-next-hci-rx hci)))
 
-(defun process-hci (hci packet)
-  ;; Will be redefined later
-  (declare (ignore hci packet)))
+(declaim (ftype function process-hci))
 
 (defun do-idle-work (hci)
   (log-trace (format nil "IDLE"))
@@ -1000,8 +1007,6 @@
          (let ((,instance (make-hci-packetizer ,h2c ,c2h)))
            (progn ,@body)
          )))))
-
-(ql:quickload :cserial-port)
 
 (defmacro with-serial-packetizer (instance serial-port-path &body body)
   `(cserial-port:with-serial
@@ -1441,10 +1446,11 @@
         :handle-value-cfm #x1E
         :signed-write-cmd #xD2))
 
-(defun att-make-opcode (op-name &optional single)
-  (if (not single)
-      (make-c-int :u8 (getf +att-opcodes+ op-name))
-      (getf +att-opcodes+ op-name)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun att-make-opcode (op-name &optional single)
+    (if (not single)
+        (make-c-int :u8 (getf +att-opcodes+ op-name))
+        (getf +att-opcodes+ op-name))))
 
 (defconstant +att-requests+
   (mapcar (lambda (o) (att-make-opcode o t))
@@ -2531,8 +2537,6 @@
 
 (defun smp-make-packet (op param)
   (append (smp-make-opcode op) param))
-
-(ql:quickload :ironclad)
 
 (defparameter *testkey* nil)
 ;; (defparameter *testkey* (ironclad:generate-key-pair :SECP256R1))

@@ -1,5 +1,12 @@
 ;; eval utils.lisp before
-(ql:quickload '(:jsonrpc :usocket :yason))
+(require 'asdf)
+(require :host-utils)
+(require :jsonrpc)
+(require :usocket)
+(require :yason)
+
+(in-package :host)
+
 (setf yason:*list-encoder* 'yason:encode-alist)
 
 (defun make-att-ribute-type (type)
@@ -326,3 +333,5 @@
                       (setf rsp (evt->json (sb-concurrency:receive-message *evts*))))
                     (log-inf "<<< ~A" rsp)
                     rsp)))
+
+(log-inf "JRPC SERVER READY")

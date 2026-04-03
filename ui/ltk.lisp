@@ -1,4 +1,7 @@
-;; eval utils.lisp before
+(require 'asdf)
+(require :host-utils)
+(in-package :host)
+
 (ql:quickload "nodgui")
 ;; (nodgui.demo:demo)
 (setf nodgui:*default-theme* "default")
