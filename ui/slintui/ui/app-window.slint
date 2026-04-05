@@ -212,6 +212,11 @@ export component AppWindow inherits Window {
         {title: "Connect", id: Command.connect},
         {title: "Bond", id: Command.bond},
         {title: "Disconnect", id: Command.disconnect},
+
+        {title: "ATT Read", id: Command.att-read},
+        {title: "ATT Write", id: Command.att-write-req},
+        {title: "ATT Write Cmd", id: Command.att-write-cmd},
+        {title: "ATT Notify", id: Command.att-notify},
     ];
 
     property <[LazyMenuItem]> menus : [
