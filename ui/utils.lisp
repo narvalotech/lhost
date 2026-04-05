@@ -76,43 +76,6 @@
   (when event
     (sb-concurrency:send-message mailbox event)))
 
-(defun sort-scan (by devices)
-  (sort devices
-        (case by
-          (:recent (lambda (a b) (< (getf a :timestamp) (getf b :timestamp))))
-          (:rssi (lambda (a b) (> (getf a :rssi) (getf b :rssi))))
-          (:name (lambda (a b) (string-lessp (getf a :name) (getf b :name))))
-          (otherwise (lambda (a b) (string-lessp (getf a :name) (getf b :name)))))))
-
-(defun filter-scan (name-filter devices)
-  (if (zerop (length name-filter))
-      devices
-      (remove-if-not (lambda (device)
-                       ;; Case-insensitive search
-                       (search name-filter (getf device :name) :test #'equalp))
-                     devices)))
-
-(defun make-connection-object (address-with-type handle treeview)
-  (list :address-with-type address-with-type :handle handle :treeview treeview))
-
-(defun handle->address (hci-handle connections)
-  (maphash (lambda (address obj)
-             (when (= (getf obj :handle) hci-handle)
-               (return-from handle->address address)))
-           connections))
-
-(defun abbrev-attribute-type (attribute)
-  (case attribute
-    (:service "Service")
-    (:characteristic-declaration " |  Char declaration")
-    (:characteristic-value " |    | Char value")
-    (:characteristic-descriptor " |    | Char descriptor")
-    (otherwise " -- ")))
-
-(defun format-attribute-data (attribute)
-  ;; TODO: make this human-readable for svc, decl, desc
-  (px (getf attribute :data)))
-
 (defparameter *cmds* (make-mailbox "ui backend -> host"))
 (defparameter *evts* (make-mailbox "ui backend <- host"))
 
@@ -189,6 +152,17 @@
                         (list :gatt-server-table
                               *gatts-table*)))
 
+                (:start-adv
+                 (progn
+                   (start-advertising hci (list
+                                           (make-ad :flags '(#x01)) ; LE General discoverable
+                                           (make-ad :class-uuid-16-incomplete
+                                                    (make-c-int :u16 +gatt-uuid-heart-rate-service+))
+                                           (make-ad-name "HRM 600 (evil)")))
+                   (log-inf "START ADV OK")))
+                (:stop-adv
+                 (hci-set-adv-enable nil hci))
+
                 (:start-scan
                  (progn
                    (log-inf "START SCAN")
@@ -221,11 +195,12 @@
                    (setf (getf (getf *active-conns* conn-handle) :address)
                          peer-address)))
                 (:bond
-                 (let ((conn-handle (nth 1 cmd)))
+                 (let ((conn-handle (nth 1 cmd))
+                       (is-central (nth 2 cmd)))
                    (log-inf "BOND")
-                   (start-security hci conn-handle)))
+                   (start-security hci conn-handle :is-peripheral (not is-central))))
                 (:stash-bonds
-                 (progn
+                 (unless bonds-stash
                    (log-inf "STASH BONDS")
                    (setf bonds-stash *bonds*)
                    (setf *bonds* (make-hash-table))))

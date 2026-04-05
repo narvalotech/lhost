@@ -18,8 +18,6 @@
 - uuid name resolution (assigned numbers repo)
 
 * core
-- make proper ASDF packages
-- dedup code between ltk.lisp and utils.lisp
 - make option to run as subprocess
 - figure out how to send evts to UI in synchronous host commands
   - eg ui will not get "disconnected" event if we're waiting on cmd rsp

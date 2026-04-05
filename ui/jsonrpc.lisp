@@ -171,7 +171,7 @@
     (:disconnect
      (dispatch-cmd :disconnect (gethash "conn" args)))
     (:bond
-     (dispatch-cmd :bond (gethash "conn" args)))
+     (dispatch-cmd :bond (gethash "conn" args) t))
 
     (:att-read
      (dispatch-cmd :att-read

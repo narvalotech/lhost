@@ -7,76 +7,6 @@
 (setf nodgui:*default-theme* "default")
 (sb-ext:add-package-local-nickname :ng :nodgui)
 
-(defun make-a-sign (byte)
-  (if (logbitp 7 byte)
-      (- byte (ash 1 8))
-      byte))
-
-(defun decode-scan-report (evt)
-  ;; TODO: handle multiple reports
-  (let ((report (nth 0 (getf (nth 1 evt) :reports))))
-    (list :address-type (getf report :address-type)
-          :address (decode-c-int (getf report :address))
-          :timestamp (get-internal-real-time)
-          :rssi (make-a-sign (getf report :rssi))
-          :data (getf report :data))))
-
-(defun merge-plist (a b)
-  (loop for (key val) on b by #'cddr
-        do (setf (getf a key) val))
-  a)
-
-(defun merge-reports (dest decoded)
-  (let ((parsed (parse-ad (getf decoded :data)))
-        (existing (getf (gethash (getf decoded :address) dest) :parsed)))
-    (setf (getf (gethash (getf decoded :address) dest) :parsed)
-          (if existing
-              (merge-plist existing parsed)
-              parsed))))
-
-(defun accumulate-scan-reports (dest report)
-  ;; Track the last 20 reports for each address
-  (let ((decoded (decode-scan-report report)))
-    (push decoded (getf (gethash (getf decoded :address) dest) :reports))
-    (nbutlast (getf (gethash (getf decoded :address) dest) :reports) 20)
-
-    ;; Parse and merge reports
-    (merge-reports dest decoded)
-    nil))
-
-(defun extract-name (parsed)
-  (let* ((encoded-name (or (getf parsed :name-complete)
-                           (getf parsed :name-short))))
-    (ignore-errors
-     (if encoded-name
-         (from-c-string encoded-name)
-         ""))))
-
-(defun make-device-list (devices-dict)
-  (let ((devices))
-    (maphash (lambda (address data)
-               (declare (ignore address))
-               (let* ((report (car (getf data :reports)))
-                      (name (extract-name (getf data :parsed))))
-                 (push (append report (list :name name)) devices)))
-             devices-dict)
-    devices))
-
-(defun print-addr (address)
-  (format nil "~{~2,'0X~^:~}"
-          (subseq (make-c-int :u64 address t) 2)))
-
-(print-addr #xF89DC52A5C01)
- ; => "F8:9D:C5:2A:5C:01"
-
-(defun decode-mac (address-string)
-  (ignore-errors
-   (parse-integer (remove #\: address-string) :radix 16)))
-
-;; look ma! end-to-end testing!
-(print-addr (decode-mac (print-addr #xF89DC52A5C01)))
- ; => "F8:9D:C5:2A:5C:01"
-
 (defun make-button (frame text command)
   (make-instance 'ng:button
                  :master frame
@@ -92,10 +22,6 @@
         (slot-value (car sel) 'ng:id))
        :values
        (slot-value (car sel) 'ng:column-values)))))
-
-(defun queue (mailbox event)
-  (when event
-    (sb-concurrency:send-message mailbox event)))
 
 (defun make-menuitem (master text q command-id &optional accelerator state)
   (apply #'make-instance
@@ -253,206 +179,6 @@
       (when sel
         ;; item ID _is_ the handle
         (read-from-string (slot-value (car sel) 'ng:id))))))
-
-(defparameter *cmds* (make-mailbox "ui backend -> host"))
-(defparameter *evts* (make-mailbox "ui backend <- host"))
-
-(defparameter *controller* (make-controller))
-
-(defun do-rx-work (hci ui-events)
-  ;; In the future, we'll have to extract data n stuff from here
-  (drain-rxq hci)
-  (loop
-    (let ((packet (receive-rxq hci)))
-      (queue ui-events packet)
-      (if packet
-          (ignore-errors
-           (process-hci hci (copy-tree packet)))
-          (return-from do-rx-work nil)))))
-
-(defun encode-address (address)
-  (list
-   :address
-   (subseq (make-c-int :u64 (getf address :address)) 0 6)
-   :type (getf address :type)))
-
-(defun save-hash-table (table filename)
-  (with-open-file (out filename
-                       :direction :output
-                       :if-exists :supersede)
-    ;; Store the test type so we can recreate it correctly
-    (print (hash-table-test table) out)
-    ;; Store the data as an alist
-    (let ((alist '()))
-      (maphash (lambda (k v) (push (cons k v) alist)) table)
-      (print alist out))))
-
-(defun load-hash-table (filename)
-  (with-open-file (in filename)
-    (let* ((test (read in))
-           (alist (read in))
-           (table (make-hash-table :test test)))
-      (dolist (pair alist)
-        (setf (gethash (car pair) table) (cdr pair)))
-      table)))
-
-(defvar *packetizer-path* *fifo-paths*)
-
-(defun start-backend (ui-events)
-  (setf *controller* (make-controller))
-  (list
-   (start-hci
-    *packetizer-path*
-    (getf *controller* :tx-mailbox)
-    (getf *controller* :rx-mailbox)
-    (getf *controller* :stop-signal))
-   (bt:make-thread
-    (lambda ()
-      (let ((hci *controller*)
-            (*active-conns*)
-            (*bonds* (make-hash-table))
-            (bonds-stash))
-        (loop
-          (let ((cmd (sb-concurrency:receive-message *cmds* :timeout .1)))
-            (when cmd
-              (log-inf "[T] sending to host: ~X" cmd)
-              (case (car cmd)
-                (:init
-                 (log-inf "INIT CONTROLLER")
-                 (init-controller hci))
-
-                (:start-adv
-                 (progn
-                   (start-advertising hci (list
-                                           (make-ad :flags '(#x01)) ; LE General discoverable
-                                           (make-ad :class-uuid-16-incomplete
-                                                    (make-c-int :u16 +gatt-uuid-heart-rate-service+))
-                                           (make-ad-name "HRM 600 (evil)")))
-                   (log-inf "START ADV OK")))
-                (:stop-adv
-                 (hci-set-adv-enable nil hci))
-
-                (:start-scan
-                 (progn
-                   (log-inf "START SCAN")
-                   (hci-set-scan-param hci)
-                   (hci-set-scan-enable hci t)))
-                (:stop-scan
-                 (progn
-                   (log-inf "STOP SCAN")
-                   (hci-set-scan-enable hci nil)))
-
-                (:connect
-                 (let ((address (nth 1 cmd)))
-                   (log-inf "CONNECT ~X" address)
-                   (hci-set-scan-enable hci nil)
-                   (hci-create-connection hci (encode-address address))))
-                (:disconnect
-                 (let ((conn-handle (nth 1 cmd)))
-                   (log-inf "DISCONNECT")
-                   (hci-disconnect hci conn-handle)))
-
-                (:clear-security
-                 (let ((conn-handle (nth 1 cmd))
-                       (peer-address (nth 2 cmd)))
-                   ;; Clear SMP context
-                   (setf (get-smp-context conn-handle) '())
-
-                   ;; SMP also reads *active-conns* for addresses
-                   (setf (getf (getf *active-conns* conn-handle) :our-address)
-                         (make-address (getf hci :random-address) #x01))
-                   (setf (getf (getf *active-conns* conn-handle) :address)
-                         peer-address)))
-                (:bond
-                 (let ((conn-handle (nth 1 cmd))
-                       (is-central (nth 2 cmd)))
-                   (log-inf "BOND (re-encrypt w/ LTK: ~X)"
-                            (start-security hci conn-handle :is-peripheral (not is-central)))
-                   ))
-                (:load-bonds
-                 (let ((bond-filename (nth 1 cmd)))
-                   (log-inf "LOAD BONDS (path: ~A)" bond-filename)
-                   (ignore-errors
-                    (setf *bonds* (load-hash-table bond-filename))
-                    (log-inf "load ok"))
-                   ))
-                (:store-bonds
-                 (unless bonds-stash    ; do not overwrite real bonds with temp
-                   (let ((bond-filename (nth 1 cmd)))
-                     (log-inf "STORE BONDS (path: ~A)" bond-filename)
-                     (ignore-errors
-                      (save-hash-table *bonds* bond-filename)
-                      (log-inf "store ok"))
-                     )))
-                (:clear-bonds
-                 (progn
-                   (log-inf "CLEAR BONDS")
-                   (setf bonds-stash nil)
-                   (setf *bonds* (make-hash-table))))
-                (:stash-bonds
-                 (unless bonds-stash
-                   (log-inf "STASH BONDS")
-                   (setf bonds-stash *bonds*)
-                   (setf *bonds* (make-hash-table))))
-                (:unstash-bonds
-                 (progn
-                   (log-inf "UN-STASH BONDS")
-                   (when bonds-stash
-                     (setf *bonds* bonds-stash)
-                     (setf bonds-stash nil))))
-
-                (:discover-gatt
-                 (let* ((conn-handle (nth 1 cmd))
-                        (gattc-table (gattc-discover hci conn-handle)))
-                   (att-set-mtu hci conn-handle 300)
-                   (queue ui-events (list :gatt-discovery-end
-                                          conn-handle
-                                          gattc-table))))
-                (:att-read
-                 (let* ((conn-handle (nth 1 cmd))
-                        (att-handle (nth 2 cmd))
-                        (data (att-read hci conn-handle att-handle)))
-                   (log-inf "ATT READ: ~X" data)))
-                (:att-write
-                 (let ((conn-handle (nth 1 cmd))
-                       (att-handle (nth 2 cmd))
-                       (data (nth 3 cmd)))
-                   (log-inf "ATT WRITE")
-                   (att-write hci conn-handle att-handle data)))
-                (:att-notify
-                 (let* ((conn-handle (nth 1 cmd))
-                        (handle (nth 2 cmd))
-                        (data (nth 3 cmd)))
-                   (log-inf "ATT NOTIFY C ~X H ~X D ~X" conn-handle handle data)
-                   (notify hci conn-handle handle data)))
-                (:quit
-                 (progn
-                   (log-inf "Exiting UI host interface")
-                   (return nil)))))
-            (do-rx-work hci ui-events)
-            ))))
-    :name "Host interface")))
-
-(defun stop-backend (backend-thread)
-  (ignore-errors
-   (when backend-thread
-     (queue *cmds* (list :quit))
-     (stop-hci (getf *controller* :stop-signal))
-     (bt:destroy-thread (nth 0 backend-thread))
-     (bt:destroy-thread (nth 1 backend-thread))
-     (sleep .5)
-     (log-inf "KILLED ALL THREADS"))
-   (loop while (drain-mailbox *evts*))
-   (loop while (drain-mailbox *cmds*))
-
-   ;; And a brand-new controller
-   (setf *controller* (make-controller))
-   ))
-
-(defun dispatch-cmd (cmd-id &rest args)
-  (log-inf "DISPATCH ~A~A" cmd-id (if args (format nil " ARGS ~X" args) ""))
-  (queue *cmds* (push cmd-id args))
-  t)
 
 (defun fromhexstream (str &optional (bytes 1))
   (ignore-errors
@@ -639,13 +365,13 @@
     (make-menuitem connection-menu "Delete bonds" ui-events :clear-bonds "<Control-x>")
 
     ;; GATT client
-    (make-menuitem att-menu "Read" ui-events :att-read "<r>" :disabled)
-    (make-menuitem att-menu "Write" ui-events :att-write "<w>" :disabled)
+    (make-menuitem att-menu "Read" ui-events :att-read "<r>")
+    (make-menuitem att-menu "Write" ui-events :att-write "<w>")
 
     ;; GATT server
     (make-menuitem gatt-server-menu "Read" ui-events :gatt-server-get "<R>" :disabled)
     (make-menuitem gatt-server-menu "Write" ui-events :gatt-server-set "<W>" :disabled)
-    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<N>" :disabled)
+    (make-menuitem gatt-server-menu "Notify" ui-events :att-notify "<N>")
     (make-menuitem gatt-server-menu "Clone peer table" ui-events :gatt-server-clone "<Control-C>" :disabled)
 
     ;; Big business
