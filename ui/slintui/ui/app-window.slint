@@ -14,22 +14,30 @@ component ScanResults inherits Rectangle {
     in-out property <[[StandardListViewItem]]> device_rows: [];
     in-out property <int> current-row: tv.current-row;
     callback sort-scan-results-cb(int, bool);
+    callback key-cb(KeyEvent);
     property <length> char-width: 15px;
 
     min-width: 500px;
     min-height: 200px;
-    VerticalLayout {
-        tv := StandardTableView {
-            sort-ascending(idx) => { sort-scan-results-cb(idx, true); }
-            sort-descending(idx) => { sort-scan-results-cb(idx, false); }
+    FocusScope {
+        key-pressed(event) => {
+            key-cb(event);
+            accept
+        }
 
-            columns: [
-                { title: "Address", width: (char-width * 12) },
-                { title: "RSSI", width: (char-width * 5) },
-                { title: "Name", min-width: (char-width * 5) },
-                { title: "Data", min-width: (char-width * 30) },
-            ];
-            rows: root.device_rows;
+        VerticalLayout {
+            tv := StandardTableView {
+                sort-ascending(idx) => { sort-scan-results-cb(idx, true); }
+                sort-descending(idx) => { sort-scan-results-cb(idx, false); }
+
+                columns: [
+                    { title: "Address", width: (char-width * 12) },
+                    { title: "RSSI", width: (char-width * 5) },
+                    { title: "Name", min-width: (char-width * 5) },
+                    { title: "Data", min-width: (char-width * 30) },
+                ];
+                rows: root.device_rows;
+            }
         }
     }
 }
@@ -43,21 +51,29 @@ struct DeviceData {
 component GattView inherits Rectangle {
     in property <DeviceData> data;
     callback row-changed(int);
+    callback key-cb(KeyEvent);
     property <length> char-width: 15px;
 
     min-width: 500px;
     min-height: 200px;
-    VerticalLayout {
-        tv := StandardTableView {
-            columns: [
-                { title: "Handle", width: (char-width * 7) },
-                { title: "Type", width: (char-width * 12) },
-                { title: "UUID", width: (char-width * 18) },
-                { title: "Value" },
-            ];
-            rows: root.data.gatt;
-            current-row-changed(index) => {
-                row-changed(index)
+    FocusScope {
+        key-pressed(event) => {
+            key-cb(event);
+            accept
+        }
+
+        VerticalLayout {
+            tv := StandardTableView {
+                columns: [
+                    { title: "Handle", width: (char-width * 7) },
+                    { title: "Type", width: (char-width * 12) },
+                    { title: "UUID", width: (char-width * 18) },
+                    { title: "Value" },
+                ];
+                rows: root.data.gatt;
+                current-row-changed(index) => {
+                    row-changed(index)
+                }
             }
         }
     }
@@ -335,6 +351,11 @@ export component AppWindow inherits Window {
                                         root.scan-filter.ascending = asc;
                                         root.filter-scan-results(scan-filter);
                                     }
+                                    key-cb(event) => {
+                                        if (event.text == "c") {button(Command.connect);}
+                                        if (event.text == "s") {button(Command.start-scan);}
+                                        if (event.text == "S") {button(Command.stop-scan);}
+                                    }
                                 }
                             }
                         }
@@ -345,6 +366,9 @@ export component AppWindow inherits Window {
                                 root.current-att-row = index;
                                 root.current-att-handle = self.data.gatt[index][0].text;
                             }
+                            key-cb(event) => {
+                                if (event.text == "n") {button(Command.att-notify);}
+                            }
                         }
 
                         for device[i] in root.all-devices : GattView {
@@ -353,6 +377,18 @@ export component AppWindow inherits Window {
                             row-changed(index) => {
                                 root.current-att-row = index;
                                 root.current-att-handle = device.gatt[index][0].text;
+                            }
+                            key-cb(event) => {
+                                if (event.text == "d") {button(Command.disconnect);}
+
+                                if (event.text == "b") {button(Command.bond);}
+                                if (event.text == "s") {button(Command.stash-bonds);}
+                                if (event.text == "S") {button(Command.unstash-bonds);}
+                                if (event.text == "k") {button(Command.clear-bonds);}
+
+                                if (event.text == "r") {button(Command.att-read);}
+                                if (event.text == "w") {button(Command.att-write-req);}
+                                if (event.text == "W") {button(Command.att-write-cmd);}
                             }
                         }
                     }

@@ -2,7 +2,6 @@
 
 * missing ui/ux
 ** slint
-- keyboard shortcuts
 - device selection / backend bar
 - show "bonds" window
   - show gap name + address + LTK
