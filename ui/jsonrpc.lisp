@@ -124,6 +124,11 @@
                     (cons "data" #())
                     (cons "repr" repr)))))
 
+(defun make-bonded-event (address)
+  (list (cons "bonded"
+              (list (cons "address_type" (getf address :type))
+                    (cons "address" (getf address :address))))))
+
 (defun fake-att-read-rsp (handle data)
   (list :op :att-read-rsp (append (make-c-int :u16 handle) data)))
 
@@ -261,6 +266,10 @@
      (let* ((att-handle (nth 2 evt))
             (data (nth 3 evt)))
        (make-att-event (format nil "~X" (fake-att-read-rsp att-handle data)))))
+
+    (:bonded
+     (let* ((address (nth 1 evt)))
+       (make-bonded-event address)))
 
     (:evt
      (case (car (cadr evt))

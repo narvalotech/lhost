@@ -92,6 +92,7 @@ pub enum RemoteEvent {
     Discovered(PeerDevice),
     ServerDiscovered(PeerDevice),
     AttPacket(ATTPacket),
+    Bonded(Address),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

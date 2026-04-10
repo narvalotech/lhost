@@ -75,6 +75,18 @@ fn ui_update_devices(devices: &Vec<PeerDevice>, ui_handle: &slint::Weak<AppWindo
         .unwrap();
 }
 
+fn ui_load_bond(address: Address, ui_handle: &slint::Weak<AppWindow>) {
+    ui_handle
+        .upgrade_in_event_loop(move |ui| {
+            let model = ui.get_bonded_devices();
+            let the_model = model.as_any().downcast_ref::<VecModel<SharedString>>()
+                .expect("Wrong type");
+
+            the_model.push(SharedString::from(format!("{}", address)));
+        })
+        .unwrap();
+}
+
 fn ui_update_gatt_server(own_gatt: &PeerDevice, ui_handle: &slint::Weak<AppWindow>) {
     let gatt = own_gatt.clone();
 
@@ -215,6 +227,9 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
             }
             RemoteEvent::AttPacket(res) => {
                 info!("ATT RX: {}", res.repr);
+            }
+            RemoteEvent::Bonded(res) => {
+                ui_load_bond(res, &ui_handle);
             }
         }
     }
@@ -405,6 +420,13 @@ fn main() {
                 info!("Deleting bonds");
                 let cmd = RemoteCommand::ClearBonds;
                 tx_chan.blocking_send(cmd).unwrap();
+
+                // Clear the bonded list in the scan filters
+                let ui = ui_handle.upgrade().unwrap();
+                let model = ui.get_bonded_devices();
+                let the_model = model.as_any().downcast_ref::<VecModel<SharedString>>()
+                    .expect("Wrong type");
+                the_model.clear();
             }
             Command::StashBonds => {
                 info!("Stashing bonds");
@@ -526,6 +548,9 @@ fn main() {
 
     let gatt_server = DeviceData::default();
     ui.set_gatt_server(gatt_server);
+
+    let bonded_devices = Rc::new(VecModel::<SharedString>::default());
+    ui.set_bonded_devices(bonded_devices.clone().into());
 
     start_server(true);
 

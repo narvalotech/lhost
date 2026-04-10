@@ -5,7 +5,6 @@
 - device selection / backend bar
 - show "bonds" window
   - show gap name + address + LTK
-  - filter adv by bonded
 - show advertising data on hover
   - and decode further, e.g. uuid128 etc
 - advertising

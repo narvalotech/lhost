@@ -148,6 +148,7 @@
             (*ui-events* ui-events)
             (*bonds* (make-hash-table))
             (bonds-stash))
+        (declare (special *ui-events*))
         (loop
           (let ((cmd (sb-concurrency:receive-message *cmds* :timeout .1)))
             (when cmd
@@ -223,7 +224,11 @@
                    (log-inf "LOAD BONDS (path: ~A)" bond-filename)
                    (ignore-errors
                     (setf *bonds* (load-hash-table bond-filename))
-                    (log-inf "load ok: ~X" (bonds->list *bonds*)))
+                    (log-inf "load ok: ~X" (bonds->list *bonds*))
+                    (maphash (lambda (k v)
+                               (declare (ignore k))
+                               (queue ui-events (list :bonded (getf v :peer))))
+                             *bonds*))
                    ))
                 (:store-bonds
                  (unless bonds-stash    ; do not overwrite real bonds with temp
