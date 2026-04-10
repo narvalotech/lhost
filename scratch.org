@@ -22,8 +22,6 @@
 
 * core
 - make option to run as subprocess
-- figure out how to send evts to UI in synchronous host commands
-  - eg ui will not get "disconnected" event if we're waiting on cmd rsp
 
 * random code snippets
 #+BEGIN_SRC lisp

@@ -81,11 +81,18 @@
 
 (defparameter *controller* (make-controller))
 
+(defparameter *ui-events* nil)
+
+;; SSL added and removed here </meme>
+(defun add-to-rxq (hci packet)
+  (when (cadr packet)
+    (queue *ui-events* (copy-tree packet))
+    (push packet (getf hci :rxq))))
+
 (defun do-rx-work (hci ui-events)
   (drain-rxq hci)
   (loop
     (let ((packet (receive-rxq hci)))
-      (queue ui-events packet)
       (if packet
           (ignore-errors
            (process-hci hci (copy-tree packet)))
@@ -138,6 +145,7 @@
     (lambda ()
       (let ((hci *controller*)
             (*active-conns*)
+            (*ui-events* ui-events)
             (*bonds* (make-hash-table))
             (bonds-stash))
         (loop
@@ -233,13 +241,20 @@
 
                 (:discover-gatt
                  (let* ((conn-handle (nth 1 cmd))
-                        (gattc-table (gattc-discover hci conn-handle)))
+                        (gattc-table
+                          (handler-case
+                              (sb-ext:with-timeout 5
+                                (gattc-discover hci conn-handle))
+                            (sb-ext:timeout ()
+                              (log-err "GATT DISCOVERY TIMED OUT")
+                              nil))))
                    (setf *latest-gattc-table* gattc-table)
                    (log-dbg "DISCOVERED: ~A"
                             (gattc-print gattc-table))
-                   (queue ui-events (list :gatt-discovery-end
-                                          conn-handle
-                                          gattc-table))))
+                   (when gattc-table
+                     (queue ui-events (list :gatt-discovery-end
+                                            conn-handle
+                                            gattc-table)))))
                 (:att-read
                  (let* ((conn-handle (nth 1 cmd))
                         (att-handle (nth 2 cmd))
