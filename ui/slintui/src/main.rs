@@ -14,7 +14,7 @@ use tokio::task;
 use tokio_util::sync::CancellationToken;
 
 use std::fs::OpenOptions;
-use tracing::{info, error, Level};
+use tracing::{debug, info, error, Level};
 
 fn scan_result_to_row(device: &ScanResult) -> ModelRc<StandardListViewItem> {
     let addr = format!("{}", device.address);
@@ -179,7 +179,7 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
         }
         Ok(evt) = client.call::<RemoteEvent>(RemoteMethod::GetEvent) => {Some(evt)}
     } {
-        info!("Got event: {:?}", evt);
+        debug!("Got event: {:?}", evt);
         match evt {
             RemoteEvent::ScanResults(res) => {
                 ui_update_scan_results(&ui_handle, res);
