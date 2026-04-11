@@ -89,7 +89,7 @@
     (queue *ui-events* (copy-tree packet))
     (push packet (getf hci :rxq))))
 
-(defun do-rx-work (hci ui-events)
+(defun do-rx-work (hci)
   (drain-rxq hci)
   (loop
     (let ((packet (receive-rxq hci)))
@@ -297,7 +297,7 @@
                  (progn
                    (log-inf "Exiting UI host interface")
                    (return nil)))))
-            (do-rx-work hci ui-events)
+            (do-rx-work hci)
             ))))
     :name "Host interface")))
 
