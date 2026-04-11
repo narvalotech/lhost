@@ -309,6 +309,7 @@
 
           (log-inf "[~X] BONDED OK" conn-handle)
           (dispatch-cmd :store-bonds *bond-filename*)
+          (dispatch-cmd :notify-bond conn-handle)
           (make-enc-change conn-handle status enabled)
           ))
 

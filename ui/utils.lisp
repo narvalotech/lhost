@@ -208,6 +208,11 @@
                        (is-central (nth 2 cmd)))
                    (log-inf "BOND")
                    (start-security hci conn-handle :is-peripheral (not is-central))))
+                (:notify-bond
+                 (let ((conn-handle (nth 1 cmd)))
+                   (queue ui-events
+                          (list :bonded
+                                (getf (getf *active-conns* conn-handle) :address)))))
                 (:stash-bonds
                  (unless bonds-stash
                    (log-inf "STASH BONDS")
