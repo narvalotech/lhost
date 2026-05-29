@@ -124,6 +124,69 @@ static void start_discovery(void) {
 	}
 }
 
+/* ------------------ FTMS DUMMY START ------------------ */
+#include <zephyr/types.h>
+#include <stddef.h>
+#include <string.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/uuid.h>
+
+/* 16-bit UUID Definitions */
+#define BT_UUID_FTMS_VAL             0x1826
+#define BT_UUID_FTMS_FEATURE_VAL     0x2ACC
+#define BT_UUID_TREADMILL_DATA_VAL   0x2ACD
+
+#define BT_UUID_FTMS                 BT_UUID_DECLARE_16(BT_UUID_FTMS_VAL)
+#define BT_UUID_FTMS_FEATURE         BT_UUID_DECLARE_16(BT_UUID_FTMS_FEATURE_VAL)
+#define BT_UUID_TREADMILL_DATA       BT_UUID_DECLARE_16(BT_UUID_TREADMILL_DATA_VAL)
+
+/* 8 bytes of 0xFF data for the Fitness Machine Feature */
+static const uint8_t ftms_feature_data[8] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
+
+/* Callback to handle read requests for the Fitness Machine Feature */
+static ssize_t read_ftms_feature(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset,
+                             ftms_feature_data, sizeof(ftms_feature_data));
+}
+
+/* Callback for when a central enables/disables notifications on Treadmill Data */
+static void treadmill_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+                                      uint16_t value)
+{
+    bool notif_enabled = (value == BT_GATT_CCC_NOTIFY);
+    printk("Treadmill data notifications %s\n", notif_enabled ? "enabled" : "disabled");
+}
+
+/* GATT Service Declaration */
+BT_GATT_SERVICE_DEFINE(ftms_svc,
+    BT_GATT_PRIMARY_SERVICE(BT_UUID_FTMS),
+
+    /* 1. Fitness Machine Feature Characteristic (Read Only) */
+    BT_GATT_CHARACTERISTIC(BT_UUID_FTMS_FEATURE,
+                           BT_GATT_CHRC_READ,
+                           BT_GATT_PERM_READ,
+                           read_ftms_feature, NULL, NULL),
+
+    /* 2. Treadmill Data Characteristic (Notify Only) */
+    BT_GATT_CHARACTERISTIC(BT_UUID_TREADMILL_DATA,
+                           BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_NONE,
+                           NULL, NULL, NULL),
+
+    /* Client Characteristic Configuration Descriptor (CCCD) */
+    /* Crucial for the stack to allow the client to subscribe to notifications */
+    BT_GATT_CCC(treadmill_ccc_cfg_changed,
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+);
+/* ------------------ FTMS DUMMY END ------------------ */
+
 /* ------------------ GATT CLIENT END ------------------ */
 
 static bool hrf_ntf_enabled;
@@ -131,11 +194,12 @@ static bool hrf_ntf_enabled;
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID16_ALL,
-		      BT_UUID_16_ENCODE(BT_UUID_HRS_VAL))
+		      BT_UUID_16_ENCODE(0x1826)),
+	BT_DATA_BYTES(BT_DATA_SVC_DATA16, BT_UUID_16_ENCODE(0x1826), 0x01, 0x01, 0x00),
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1)
 };
 
 static const struct bt_data sd[] = {
-	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
 /* Use atomic variable, 2 bits for connection and disconnection state */
@@ -227,7 +291,7 @@ int main(void)
 	bt_hrs_cb_register(&hrs_cb);
 
 	printk("Starting Legacy Advertising (connectable and scannable)\n");
-	err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
 		printk("Advertising failed to start (err %d)\n", err);
 		return 0;
