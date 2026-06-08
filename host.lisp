@@ -68,7 +68,7 @@
 (defun pxx (l)
   (format nil "0x~{~2,'0X~}" l))
 
-(defconstant +u64-max+ (ldb (byte 64 0) -1))
+(defparameter +u64-max+ (ldb (byte 64 0) -1))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun make-range (max)
@@ -238,7 +238,7 @@
 
 ;;;;;;;;;;;;; HCI packet-building
 
-(defconstant +h4-types+
+(defparameter +h4-types+
   (list :cmd #x1
         :acl #x2
         :evt #x4
@@ -748,7 +748,7 @@
         :channel (pull-int fragment :u16)
         :data fragment))
 
-(defconstant +l2-hdr-size+ 4)
+(defparameter +l2-hdr-size+ 4)
 
 (defun complete-acl (packetizer conn fragment)
   ;; for now only one conn supported
@@ -1142,7 +1142,7 @@
                  :max-connection-event-length #xffff)))
 
 ;; TODO: define all error codes
-(defconstant +remote-user-terminated+ #x13)
+(defparameter +remote-user-terminated+ #x13)
 
 (defun hci-disconnect (hci handle)
   (hci-send-cmd
@@ -1151,7 +1151,7 @@
                  :handle handle
                  :reason +remote-user-terminated+)))
 
-(defconstant +ad-types+
+(defparameter +ad-types+
   (list :flags #x01
         :class-uuid-16-incomplete #x02
         :class-uuid-16-complete #x03
@@ -1284,8 +1284,8 @@
 (pretty-print-uuid #x6E40)
  ; => "6E40"
 
-(defconstant +nus-uuid+ "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
-(defconstant +battery-uuid+ "180F")
+(defparameter +nus-uuid+ "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+(defparameter +battery-uuid+ "180F")
 (px (parse-uuid +nus-uuid+))
  ; => "9E CA DC 24 0E E5 A9 E0 93 F3 A3 B5 01 00 40 6E"
 (px (parse-uuid +battery-uuid+))
@@ -1388,7 +1388,7 @@
 ;; - error-rsp
 ;; - find-information-req
 ;; - read-req
-(defconstant +att-errors+
+(defparameter +att-errors+
   (list :invalid-handle #x01
         :read-not-permitted #x02
         :write-not-permitted #x03
@@ -1413,7 +1413,7 @@
         :common-profile-and-service-errors-start #xE0
         :common-profile-and-service-errors-end #xFF))
 
-(defconstant +att-opcodes+
+(defparameter +att-opcodes+
   (list :error-rsp #x01
         :exchange-mtu-req #x02
         :exchange-mtu-rsp #x03
@@ -1452,7 +1452,7 @@
         (make-c-int :u8 (getf +att-opcodes+ op-name))
         (getf +att-opcodes+ op-name))))
 
-(defconstant +att-requests+
+(defparameter +att-requests+
   (mapcar (lambda (o) (att-make-opcode o t))
           (list
            :exchange-mtu-req
@@ -1494,7 +1494,7 @@
       (make-c-int :u16 channel)
       packet))))
 
-(defconstant +l2cap-att-chan+ #x0004)
+(defparameter +l2cap-att-chan+ #x0004)
 
 (defun att? (conn-handle &optional opcode-value req)
   (lambda (p)
@@ -1589,12 +1589,13 @@
       (unless (att-error? (pull-int data :u8))
         (att-decode-read-by-group-type-rsp data)))))
 
-(defconstant +gatt-uuid-primary-service+ #x2800)
-(defconstant +gatt-uuid-characteristic+ #x2803)
-(defconstant +gatt-uuid-cccd+ #x2902)
-(defconstant +gatt-uuid-heart-rate-service+ #x180D)
-(defconstant +gatt-uuid-heart-rate-measurement+ #x2A37)
-(defconstant +gatt-uuid-gap-device-name+ #x2A00)
+(defparameter +gatt-uuid-primary-service+ #x2800)
+(defparameter +gatt-uuid-characteristic+ #x2803)
+(defparameter +gatt-uuid-cccd+ #x2902)
+(defparameter +gatt-uuid-heart-rate-service+ #x180D)
+(defparameter +gatt-uuid-heart-rate-measurement+ #x2A37)
+(defparameter +gatt-uuid-gap-device-name+ #x2A00)
+(defparameter +gatt-uuid-gap-ppcp+ #x2A04)
 
 (defun encode-uuid (uuid)
   (if (<= uuid #xFFFF)
@@ -1894,7 +1895,7 @@
     table)
    :handle))
 
-(defconstant +gatt-cccd-mask-notification+ #x0001)
+(defparameter +gatt-cccd-mask-notification+ #x0001)
 
 (defun gattc-subscribe (hci conn table value-uuid)
   (let ((cccd-handle (gattc-find-cccd-handle
@@ -1991,7 +1992,7 @@
                    (if (> uuid #xFFFF) :u128 :u16) uuid))))
    name))
 
-(defconstant +gatt-characteristic-properties+
+(defparameter +gatt-characteristic-properties+
   (list
    :broadcast
    :read
@@ -2147,10 +2148,10 @@
           :insufficient-authentication)))
      )))
 
-(defconstant +gatt-uuid-gatt-service+ #x1801)
-(defconstant +gatt-uuid-gatt-service-changed+ #x2A05)
-(defconstant +gatt-uuid-gap-service+ #x1800)
-(defconstant +gatt-uuid-gap-appearance+ #x2A01)
+(defparameter +gatt-uuid-gatt-service+ #x1801)
+(defparameter +gatt-uuid-gatt-service-changed+ #x2A05)
+(defparameter +gatt-uuid-gap-service+ #x1800)
+(defparameter +gatt-uuid-gap-appearance+ #x2A01)
 
 (defparameter *gatts-table*
   (gatts-make-table
@@ -2504,7 +2505,7 @@
         (search name (from-c-string encoded-name) :test #'equalp)
         nil)))
 
-(defconstant +smp-opcodes+
+(defparameter +smp-opcodes+
   (list :pairing-request #x01
         :pairing-response #x02
         :pairing-confirm #x03
@@ -2520,7 +2521,7 @@
         :pairing-dhkey-check #x0D
         :pairing-keypress-notification #x0E))
 
-(defconstant +l2cap-smp-chan+ #x0006)
+(defparameter +l2cap-smp-chan+ #x0006)
 
 (defun smp? (conn-handle)
   (lambda (p)
@@ -2601,9 +2602,9 @@
               texts))
     'list)))
 
-(defconstant +iocap-no-display-no-keyboard+ #x03)
+(defparameter +iocap-no-display-no-keyboard+ #x03)
 
-(defconstant +our-iocap+ '(#x03 #x00 #x09))
+(defparameter +our-iocap+ '(#x03 #x00 #x09))
 
 (defun smp-send (hci conn-handle payload)
   (when payload
@@ -2938,6 +2939,8 @@
     (smp-send
      hci conn
      (ecase op-name
+       (:identity-address-information nil)
+       (:identity-information nil)
        (:pairing-failed
         (smp-process-pairing-failed conn data))
        (:security-request
@@ -3006,9 +3009,9 @@
                    :ltk ltk))
     ltk))
 
-(defconstant +l2cap-le-signalling-chan+ #x0005)
-(defconstant +l2cap-conn-param-update-req+ #x12)
-(defconstant +l2cap-conn-param-update-rsp+ #x13)
+(defparameter +l2cap-le-signalling-chan+ #x0005)
+(defparameter +l2cap-conn-param-update-req+ #x12)
+(defparameter +l2cap-conn-param-update-rsp+ #x13)
 
 (defun handle-signalling-mitm (hci conn data)
   (if (not (getf *mitm* :ready))
