@@ -6,3 +6,4 @@ build/
 *.fasl
 bonds.txt
 bonds.txt.bak
+app.core

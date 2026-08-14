@@ -71,11 +71,6 @@
 
 (ql:quickload :bordeaux-threads)
 (defparameter *server* (jsonrpc:make-server))
-;; TODO: move to raw sockets
-(bt:make-thread
- (lambda ()
-   (jsonrpc:server-listen *server* :port 30000 :mode :tcp))
- :name "JRPC server")
 
 (defun make-scan-result (device)
   (destructuring-bind
@@ -344,4 +339,12 @@
                     (log-inf "<<< ~A" rsp)
                     rsp)))
 
-(log-inf "JRPC SERVER READY")
+(defun start-jsonrpc-server ()
+  ;; TODO: move to raw sockets
+  (bt:make-thread
+   (lambda ()
+     (jsonrpc:server-listen *server* :port 30000 :mode :tcp))
+   :name "JRPC server")
+
+  (log-inf "JRPC SERVER READY"))
+(export 'start-jsonrpc-server)

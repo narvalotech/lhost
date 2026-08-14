@@ -109,29 +109,92 @@ pub fn start_server(start: bool, _child: Option<std::process::Child>) -> Option<
         let cwd = std::env::current_dir().expect("Failed to get current directory");
         let work_dir = cwd.join("../..").canonicalize().expect("Failed to resolve work directory");
 
+        let core_path = work_dir.join("app.core");
+        let lisp_files = ["host.lisp", "ui/utils.lisp", "ui/jsonrpc.lisp"];
+
+        // Helper to apply required environment variables to any SBCL command
+        let apply_sbcl_env = |cmd: &mut std::process::Command| {
+            let path = std::env::var("PATH").unwrap_or_default();
+
+            #[cfg(windows)]
+            {
+                let new_path = format!("{};C:/msys64/ucrt64/bin", path);
+                cmd.env("PATH", &new_path);
+            }
+
+            #[cfg(unix)]
+            {
+                // Note: /c/msys64/ucrt64/bin implies a Windows Unix-compatibility layer (like MSYS2 or WSL).
+                // If you intend to run this on native Linux/macOS later, you'll need standard Unix paths here.
+                let new_path = format!("{}:/c/msys64/ucrt64/bin", path);
+                cmd.env("PATH", &new_path);
+            }
+
+            // If you are bundling SBCL, you might also need to set SBCL_HOME here:
+            // cmd.env("SBCL_HOME", "/path/to/sbcl/lib/sbcl");
+        };
+
+        let rebuild_needed = || {
+            let core_meta = match std::fs::metadata(&core_path) {
+                Ok(m) => m,
+                Err(_) => return true,
+            };
+
+            let core_time = core_meta.modified().unwrap();
+
+            for file in &lisp_files {
+                let file_path = work_dir.join(file);
+                if let Ok(meta) = std::fs::metadata(&file_path) {
+                    if let Ok(mtime) = meta.modified() {
+                        if mtime > core_time {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        };
+
+        if rebuild_needed() {
+            println!("Building SBCL core image...");
+
+            let mut build_cmd = std::process::Command::new("sbcl");
+
+            // 1. APPLY ENV SETUP TO THE BUILDER
+            apply_sbcl_env(&mut build_cmd);
+
+            let status = build_cmd
+                .args(&[
+                    "--noinform",
+                    "--load", "host.lisp",
+                    "--load", "ui/utils.lisp",
+                    "--load", "ui/jsonrpc.lisp",
+                    "--eval", "(sb-ext:save-lisp-and-die \"app.core\")"
+                ])
+                .current_dir(&work_dir)
+                .status()
+                .expect("Failed to run SBCL core builder");
+
+            if !status.success() {
+                eprintln!("Failed to compile SBCL core image.");
+                return None;
+            }
+        }
+
+        // Launch SBCL instantly using the prebuilt core
         let mut cmd = std::process::Command::new("sbcl");
-        cmd.args(&["--load", "host.lisp", "--load", "ui/utils.lisp", "--load", "ui/jsonrpc.lisp", "--eval", "(loop do (sleep 1))"])
+        cmd.args(&["--noinform", "--core", "app.core", "--eval", "(progn (host:start-jsonrpc-server)(lambda () (loop do (sleep 1)))) "])
            .current_dir(&work_dir);
 
-        #[cfg(windows)]
-        {
-            let path = std::env::var("PATH").unwrap_or_default();
-            let new_path = format!("{};C:/msys64/ucrt64/bin", path);
-            cmd.env("PATH", &new_path);
-        }
+        // 2. APPLY ENV SETUP TO THE RUNNER
+        apply_sbcl_env(&mut cmd);
 
         #[cfg(unix)]
         {
-            let path = std::env::var("PATH").unwrap_or_default();
-            let new_path = format!("{}:/c/msys64/ucrt64/bin", path);
-            cmd.env("PATH", &new_path);
-
             use std::os::unix::process::CommandExt;
             unsafe {
                 cmd.pre_exec(|| {
-                    // Die when parent dies
                     libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                    // Own process group so we can kill the whole tree
                     libc::setpgid(0, 0);
                     Ok(())
                 });
@@ -143,28 +206,25 @@ pub fn start_server(start: bool, _child: Option<std::process::Child>) -> Option<
 
         #[cfg(windows)]
         {
-            // Job object ensures child tree dies if we crash/get killed
             let job = create_job_for_child(&proc);
-            // Box + leak keeps the handle alive without the forgetting_copy_types warning
             Box::leak(Box::new(job));
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(2));
-
         rt.block_on(async {
-            info!("spawning server");
+            // Note: `info!` macro usually requires `log::info!` or similar if imported
+            println!("spawning server");
             let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
             let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
-            info!("Lisp response {:?}", rsp);
+            println!("Lisp response {:?}", rsp);
         });
 
         Some(proc)
     } else {
         rt.block_on(async {
-            info!("killing server");
+            println!("killing server");
             let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
             let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
-            info!("Lisp response {:?}", rsp);
+            println!("Lisp response {:?}", rsp);
         });
 
         std::thread::sleep(std::time::Duration::from_secs(2));
