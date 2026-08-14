@@ -2112,6 +2112,14 @@
     :address)
    :address))                           ; yo dawg i herd you liked address
 
+(defparameter *smp-context* (make-hash-table))
+
+(defun get-smp-context (conn)
+  (gethash conn *smp-context*))
+
+(defun (setf get-smp-context) (new-value conn)
+  (setf (gethash conn *smp-context*) new-value))
+
 (defun encrypted? (conn)
   (getf (get-smp-context conn) :encrypted))
 
@@ -2148,9 +2156,13 @@
   (gatts-make-table
    (gatts-make-service +gatt-uuid-gap-service+)
    (gatts-make-char-decl +gatt-uuid-gap-device-name+ (make-props '(:read)))
-   (gatts-make-char-value +gatt-uuid-gap-device-name+ (list :read (lambda (c h) (to-c-string "LHost"))))
+   (gatts-make-char-value +gatt-uuid-gap-device-name+ (list :read (lambda (c h)
+                                                                    (declare (ignore c h))
+                                                                    (to-c-string "LHost"))))
    (gatts-make-char-decl +gatt-uuid-gap-appearance+ (make-props '(:read)))
-   (gatts-make-char-value +gatt-uuid-gap-appearance+ (list :read (lambda (c h) (make-c-int :u16 #x0012))))
+   (gatts-make-char-value +gatt-uuid-gap-appearance+ (list :read (lambda (c h)
+                                                                   (declare (ignore c h))
+                                                                   (make-c-int :u16 #x0012))))
 
    (gatts-make-service +gatt-uuid-gatt-service+)
    (gatts-make-char-decl +gatt-uuid-gatt-service-changed+ (make-props '(:indicate)))
@@ -2268,6 +2280,15 @@
     (log-dbg (format nil "READ-BY-TYPE-REQ start ~X end ~X" start end))
     (gatts-find-char-rsp *gatts-table* type start end)))
 
+(defun get-uuid-size (uuid)
+  ;; Here uuid is a number, not a list
+  (if (< uuid #x10000) 2 16))
+
+(get-uuid-size #x1230)
+ ; => 2 (2 bits, #x2, #o2, #b10)
+(get-uuid-size #x6E400001B5A3F393E0A9E50E24DCCA9E)
+ ; => 16 (5 bits, #x10, #o20, #b10000)
+
 (defun gatts-read-by-group-type-rsp (table search-start search-end)
   (destructuring-bind (&key start end)
       (gatt-find-service table nil search-start search-end)
@@ -2294,15 +2315,6 @@
         (gatts-read-by-group-type-rsp *gatts-table* start end)
         (att-error-rsp
          :read-by-group-type-req 0 :request-not-supported))))
-
-(defun get-uuid-size (uuid)
-  ;; Here uuid is a number, not a list
-  (if (< uuid #x10000) 2 16))
-
-(get-uuid-size #x1230)
- ; => 2 (2 bits, #x2, #o2, #b10)
-(get-uuid-size #x6E400001B5A3F393E0A9E50E24DCCA9E)
- ; => 16 (5 bits, #x10, #o20, #b10000)
 
 (defun gatts-find-info-rsp (table start end)
   (let* ((uuid-size)
@@ -2521,14 +2533,6 @@
 
 (defun smp-receive (hci conn-handle)
   (receive-if hci (smp? conn-handle)))
-
-(defparameter *smp-context* (make-hash-table))
-
-(defun get-smp-context (conn)
-  (gethash conn *smp-context*))
-
-(defun (setf get-smp-context) (new-value conn)
-  (setf (gethash conn *smp-context*) new-value))
 
 (defun smp-make-opcode (op-name &optional single)
   (if (not single)
