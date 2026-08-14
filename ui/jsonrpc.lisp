@@ -74,7 +74,7 @@
 ;; TODO: move to raw sockets
 (bt:make-thread
  (lambda ()
-   (jsonrpc:server-listen *server* :port 55000 :mode :tcp))
+   (jsonrpc:server-listen *server* :port 30000 :mode :tcp))
  :name "JRPC server")
 
 (defun make-scan-result (device)

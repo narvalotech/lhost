@@ -153,7 +153,7 @@ pub fn start_server(start: bool, _child: Option<std::process::Child>) -> Option<
 
         rt.block_on(async {
             info!("spawning server");
-            let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+            let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
             let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
             info!("Lisp response {:?}", rsp);
         });
@@ -162,7 +162,7 @@ pub fn start_server(start: bool, _child: Option<std::process::Child>) -> Option<
     } else {
         rt.block_on(async {
             info!("killing server");
-            let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+            let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
             let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
             info!("Lisp response {:?}", rsp);
         });

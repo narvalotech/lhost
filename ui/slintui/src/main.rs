@@ -178,7 +178,7 @@ fn fromhex(input: SharedString) -> Vec<u8> {
 }
 
 async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<AppWindow>) {
-    let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+    let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
 
     info!("startin events");
 
@@ -238,7 +238,7 @@ async fn backend_event_task(cancel: CancellationToken, ui_handle: slint::Weak<Ap
 }
 
 async fn backend_cmd_task(cancel: CancellationToken, mut rx_chan: mpsc::Receiver<RemoteCommand>) {
-    let mut client = LispClient::new("127.0.0.1:55000").await.unwrap();
+    let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
 
     while let Some(res) = rx_chan.recv().await {
         info!("JRPC THREAD: {:?}", res);
