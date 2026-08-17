@@ -332,11 +332,11 @@
                 ;; Only one concurrent client supported
                 (lambda (args)
                   (declare (ignore args))
-                  (log-inf ">>> Get event")
+                  (log-dbg ">>> Get event")
                   (let ((rsp))
                     (loop until rsp do
                       (setf rsp (evt->json (sb-concurrency:receive-message *evts*))))
-                    (log-inf "<<< ~A" rsp)
+                    (log-dbg "<<< ~A" rsp)
                     rsp)))
 
 (defun start-jsonrpc-server ()
