@@ -348,3 +348,55 @@
 
   (log-inf "JRPC SERVER READY"))
 (export 'start-jsonrpc-server)
+
+(defvar *hci-log-stream* nil)
+(defvar *hci-log-start-time* nil)
+
+(defun hci-log-open (&optional (path "./snoop.log"))
+  (setf *hci-log-start-time* (get-internal-real-time))
+
+  (setf *hci-log-stream*
+        (open path
+              :direction :output
+              :if-exists :supersede
+              :if-does-not-exist :create
+              :element-type '(unsigned-byte 8)))
+
+  ;; BTSnoop file header
+  (write-bytes (to-c-string "btsnoop" t) *hci-log-stream*)
+  (write-bytes (make-c-int :u32 1 t) *hci-log-stream*)
+  ;; Datalink type: UART
+  (write-bytes (make-c-int :u32 1002 t) *hci-log-stream*)
+
+  (finish-output *hci-log-stream*))
+
+(defun hci-log (direction packet)
+  (when *hci-log-stream*
+    (let ((entry
+            (list
+             :timestamp (- (get-internal-real-time)
+                           *hci-log-start-time*)
+             :direction direction
+             :packet packet)))
+      (write-bytes (make-header entry) *hci-log-stream*)
+      (write-bytes packet *hci-log-stream*)
+
+      ;; Optional: durability vs performance tradeoff
+      (finish-output *hci-log-stream*))))
+
+(defun hci-log-close ()
+  (when *hci-log-stream*
+    (close *hci-log-stream*)
+    (setf *hci-log-stream* nil)))
+
+;; Old API
+(defun hci-log-write ()
+  (hci-log-close))
+
+(defun hci-log-reset ()
+  (hci-log-open))
+
+;; (start-jsonrpc-server)
+
+;; (sb-ext:gc :full t)
+;; (room t)
