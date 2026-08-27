@@ -2505,6 +2505,14 @@
         (search name (from-c-string encoded-name) :test #'equalp)
         nil)))
 
+(defun uuid? (uuid report)
+  ;; Sample report
+  (let* ((ad (getf (copy-tree report) :data))
+         (parsed (parse-ad ad))
+         (uuids (or (getf parsed :class-uuid-16-complete)
+                    (getf parsed :class-uuid-16-incomplete))))
+    (search (make-c-int :u16 uuid) uuids)))
+
 (defparameter +smp-opcodes+
   (list :pairing-request #x01
         :pairing-response #x02
