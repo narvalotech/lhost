@@ -1,0 +1,30 @@
+syntax = "proto2";
+
+package prototest;
+
+enum RaState {
+  STATE_UNSPECIFIED = 0;
+  STATE_RUNNING = 1;
+  STATE_PAUSED = 2;
+  STATE_STOPPED = 3;
+}
+
+message Tee {
+  optional sint32 range = 10;
+  optional sint32 dist_x = 11;
+  optional int32 dist_y = 12;
+}
+
+message Omnibus {
+  optional RaState state = 1;
+
+  optional int32 flags = 2;
+
+  // AoS
+  repeated Tee objects = 3;
+
+  // SoA
+  repeated sint32 range = 10;
+  repeated sint32 dist_x = 11;
+  optional int32 dist_y = 12;
+}
