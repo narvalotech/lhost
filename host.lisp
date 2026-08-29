@@ -2229,8 +2229,8 @@
       (list :start service-start
             :end (if service-end (- service-end 1) #xFFFF)))))
 
-(gatt-find-service
- *gatts-table* +gatt-uuid-heart-rate-service+ 1 #xFFFF)
+;; (gatt-find-service
+;;  *gatts-table* +gatt-uuid-heart-rate-service+ 1 #xFFFF)
  ; => (:START 1 :END 65535)
 
 (defun gatts-find-service-rsp (table uuid search-start search-end)
