@@ -2947,6 +2947,7 @@
     (smp-send
      hci conn
      (ecase op-name
+       (:signing-information nil)
        (:identity-address-information nil)
        (:identity-information nil)
        (:pairing-failed
