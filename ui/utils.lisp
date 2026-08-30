@@ -127,16 +127,17 @@
 (defvar *packetizer-path* "COM6")
 (defvar *latest-gattc-table* nil)
 
-(defun start-backend (ui-events)
+(defun start-backend (ui-events &key (packetizer-path *packetizer-path*))
   (setf *controller* (make-controller))
   (hci-log-reset)
 
   ;; Empty events mailbox
   (loop until (sb-concurrency:mailbox-empty-p ui-events))
+  (log-inf "Starting backend on ~A" packetizer-path)
 
   (list
    (start-hci
-    *packetizer-path*
+    packetizer-path
     (getf *controller* :tx-mailbox)
     (getf *controller* :rx-mailbox)
     (getf *controller* :stop-signal))

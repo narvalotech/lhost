@@ -26,6 +26,27 @@ pub fn kill_subprocess() {
     }
 }
 
+pub fn start_server(start: bool) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    rt.block_on(async {
+        // TODO: user field in UI
+        let hci_path = if cfg!(target_os = "windows") {"COM6"} else {"/dev/ttyACM0"};
+
+        let rsp: String = if start {
+            // Note: `info!` macro usually requires `log::info!` or similar if imported
+            println!("spawning server");
+            let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
+            client.call(RemoteMethod::Command(RemoteCommand::Open { path: hci_path.to_string() } )).await.unwrap()
+        } else {
+            println!("killing server");
+            let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
+            client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap()
+        };
+        println!("Lisp response {:?}", rsp);
+    });
+}
+
 /// On Windows: create a Job Object so the OS kills the child tree if we exit/crash.
 /// Returns a raw HANDLE that must be kept alive for the lifetime of the app.
 #[cfg(windows)]
@@ -102,8 +123,11 @@ fn create_job_for_child(child: &std::process::Child) -> *mut std::ffi::c_void {
     }
 }
 
-pub fn start_server(start: bool, _child: Option<std::process::Child>) -> Option<std::process::Child> {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+pub fn start_subprocess(start: bool, _child: Option<std::process::Child>) -> Option<std::process::Child> {
+    if cfg!(target_os = "linux")
+    {
+        return None;
+    }
 
     if start {
         let cwd = std::env::current_dir().expect("Failed to get current directory");
@@ -210,23 +234,8 @@ pub fn start_server(start: bool, _child: Option<std::process::Child>) -> Option<
             Box::leak(Box::new(job));
         }
 
-        rt.block_on(async {
-            // Note: `info!` macro usually requires `log::info!` or similar if imported
-            println!("spawning server");
-            let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
-            let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Open)).await.unwrap();
-            println!("Lisp response {:?}", rsp);
-        });
-
         Some(proc)
     } else {
-        rt.block_on(async {
-            println!("killing server");
-            let mut client = LispClient::new("127.0.0.1:30000").await.unwrap();
-            let rsp: String = client.call(RemoteMethod::Command(RemoteCommand::Close)).await.unwrap();
-            println!("Lisp response {:?}", rsp);
-        });
-
         std::thread::sleep(std::time::Duration::from_secs(2));
 
         kill_subprocess();

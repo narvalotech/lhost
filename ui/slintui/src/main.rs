@@ -3,7 +3,7 @@ mod rpc;
 mod subprocess;
 use crate::host_types::*;
 use crate::rpc::LispClient;
-use crate::subprocess::{start_server, setup_cleanup_hooks};
+use crate::subprocess::{start_server, start_subprocess, setup_cleanup_hooks};
 
 slint::include_modules!();
 use slint::{ModelRc, Model, SharedString, StandardListViewItem, FilterModel, VecModel};
@@ -503,7 +503,8 @@ fn main() {
 
     setup_cleanup_hooks();
 
-    let server_child = start_server(true, None);
+    let server_child = start_subprocess(true, None);
+    start_server(true);
 
     let ui_handle = ui.as_weak();
     let slint_future = async_main(rx_chan, ui_handle);
@@ -512,5 +513,6 @@ fn main() {
     let _ = ui.show();
     slint::run_event_loop().unwrap();
 
-    start_server(false, server_child);
+    start_server(false);
+    start_subprocess(false, server_child);
 }

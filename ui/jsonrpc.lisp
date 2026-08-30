@@ -140,7 +140,7 @@
      (progn
        (stop-backend backend-thread)
        (sleep .1)
-       (setf backend-thread (start-backend *evts*))
+       (setf backend-thread (start-backend *evts* :packetizer-path (gethash "path" args)))
        (dispatch-cmd :init)))
     (:close
      (progn
@@ -200,8 +200,6 @@
                   (format t "args: ~A~%" args)
                   (if (stringp args)
                       (cond
-                        ((string= "open" args)
-                         (handle-cmd :open))
                         ((string= "close" args)
                          (handle-cmd :close))
 
@@ -220,6 +218,8 @@
                          (handle-cmd :unstash-bonds)))
 
                       (cond
+                        ((gethash "open" args)
+                         (handle-cmd :open (gethash "open" args)))
                         ((gethash "connect" args)
                          (handle-cmd :connect (gethash "connect" args)))
                         ((gethash "disconnect" args)
