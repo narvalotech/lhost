@@ -1010,7 +1010,7 @@
 
 (defmacro with-serial-packetizer (instance serial-port-path &body body)
   `(cserial-port:with-serial
-       (rs ,serial-port-path :baud-rate 115200 :data-bits 8 :stop-bits 1 :parity :none)
+       (rs ,serial-port-path :baud-rate 1000000 :data-bits 8 :stop-bits 1 :parity :none)
      (let* ((serial-stream (cserial-port:make-serial-stream rs))
             (,instance (make-hci-packetizer serial-stream serial-stream)))
        (progn ,@body)
