@@ -10,9 +10,9 @@ enum RaState {
 }
 
 message Tee {
-  optional sint32 range = 10;
+  optional int32 range = 10;
   optional sint32 dist_x = 11;
-  optional int32 dist_y = 12;
+  optional sint32 dist_y = 12;
 }
 
 message Omnibus {
