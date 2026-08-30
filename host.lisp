@@ -3203,3 +3203,8 @@
 (defun stop-hci (stop-signal)
   ;; Kill all threads started by start-hci
   (send-signal stop-signal))
+
+(defun get-hci-path ()
+  (or
+   (uiop:getenv "HCI_PATH")
+   "/dev/ttyACM0"))

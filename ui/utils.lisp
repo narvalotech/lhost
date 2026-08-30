@@ -124,7 +124,8 @@
         (setf (gethash (car pair) table) (cdr pair)))
       table)))
 
-(defvar *packetizer-path* "COM6")
+(defvar *packetizer-path* (get-hci-path))
+
 (defvar *latest-gattc-table* nil)
 
 (defun start-backend (ui-events &key (packetizer-path *packetizer-path*))
