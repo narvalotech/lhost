@@ -13,6 +13,63 @@
 ;;  (ldb (byte 13 0) -120) 13)
 ;;  ; => -120 (7 bits)
 
+(defparameter *mrs-schema*
+  '((:pad 4)
+    (:dist-x 13 t)
+    (:dist-y 11 t)
+    (:range 8 nil)))
+
+(defun unpack (schema data)
+  "Decode data from a bitpacked int."
+  ;; Schema counts from the beginning (opposite of LDB)
+  ;; TODO: constrain data to int
+  (let ((len (loop for field-def in schema
+                   sum (nth 1 field-def)))
+        (current-pos 0))
+
+    (loop for field-def in schema
+          nconc
+          (let* ((name (nth 0 field-def))
+                 (size (nth 1 field-def))
+                 (signed (nth 2 field-def))
+                 (pos-from-end (- len current-pos size))
+                 (value (ldb (byte size pos-from-end) data)))
+            (incf current-pos size)
+            (unless (eql name :pad)
+              (list name
+                    (if signed
+                        (make-a-sign value size)
+                        value)))))))
+
+;; (unpack *mrs-schema* #b100111111100010001111111010111110101)
+;;  ; => (:DIST-X -120 :DIST-Y -11 :RANGE 245)
+
+(defun pack (schema data-map)
+  "Pack data from a plist into an int."
+  (let ((len (loop for field-def in schema
+                   sum (nth 1 field-def)))
+        (encoded 0)
+        (current-pos 0))
+
+    (loop for field-def in schema
+          do
+          (let* ((name (nth 0 field-def))
+                 (size (nth 1 field-def))
+                 (pos-from-end (- len current-pos size))
+                 (value (getf data-map name)))
+            (incf current-pos size)
+            (when (and value (not (eql name :pad)))
+              (setf (ldb (byte size pos-from-end) encoded) value))))
+    encoded))
+
+;; (unpack *mrs-schema*
+;;         (pack
+;;          *mrs-schema*
+;;          '(:dist-x -31
+;;            :range 24
+;;            :dist-y 394)))
+;;  ; => (:DIST-X -31 :DIST-Y 394 :RANGE 24)
+
 (defun decode-scan-report (evt)
   ;; TODO: handle multiple reports
   (let ((report (nth 0 (getf (nth 1 evt) :reports))))
