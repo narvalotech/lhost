@@ -2,10 +2,16 @@
 (require :host)
 (in-package :host)
 
-(defun make-a-sign (byte)
-  (if (logbitp 7 byte)
-      (- byte (ash 1 8))
+(defun make-a-sign (byte &optional (bits 8))
+  (if (logbitp (1- bits) byte)
+      (- byte (ash 1 bits))
       byte))
+
+;; (make-a-sign #x7f)
+;;  ; => 127 (7 bits, #x7F, #o177, #b1111111)
+;; (make-a-sign
+;;  (ldb (byte 13 0) -120) 13)
+;;  ; => -120 (7 bits)
 
 (defun decode-scan-report (evt)
   ;; TODO: handle multiple reports
