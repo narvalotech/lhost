@@ -2509,12 +2509,13 @@
       (= #x0001 (decode-c-int cccd)))))
 
 (defun notify (hci conn handle value)
-  (att-send hci conn
-            (att-make-packet
-             :handle-value-ntf
-             (append
-              (make-c-int :u16 handle)
-              value))))
+  (when value
+    (att-send hci conn
+              (att-make-packet
+               :handle-value-ntf
+               (append
+                (make-c-int :u16 handle)
+                value)))))
 
 (defun encode-hr (bpm)
   (append
