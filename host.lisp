@@ -116,6 +116,11 @@
 
       octets))
 
+  (defun pad-bytes (bytes max-size)
+    (append
+     bytes
+     (make-list (- max-size (length bytes)) :initial-element 0)))
+
   ;; (type->octets :u32)
   ; => 4 (3 bits, #x4, #o4, #b100)
   ;; (type->octets :bt-addr)
@@ -286,6 +291,11 @@
 
     :set-adv-data
     (#x2008 (:len :u8
+             :data (list :u8))
+     (:status :u8))
+
+    :set-scan-data
+    (#x2009 (:len :u8
              :data (list :u8))
      (:status :u8))
 
@@ -1100,11 +1110,27 @@
 
 (defun hci-set-adv-data (hci data)
   "Sets advertising data. Input is a list of AD structures (byte lists)."
+  (when (> (length data) 31)
+    (error "Advertising data too long"))
   (let ((flattened (mapcan #'append data)))
-    (hci-send-cmd
-     hci
-     (make-hci-cmd :set-adv-data
-                   :len (length flattened) :data flattened))))
+    (when data
+      (hci-send-cmd
+       hci
+       (make-hci-cmd :set-adv-data
+                     :len (length flattened)
+                     :data (pad-bytes flattened 31))))))
+
+(defun hci-set-scan-data (hci data)
+  "Sets scan response data. Input is a list of AD structures (byte lists)."
+  (when (> (length data) 31)
+    (error "Scan data too long"))
+  (let ((flattened (mapcan #'append data)))
+    (when data
+      (hci-send-cmd
+       hci
+       (make-hci-cmd :set-scan-data
+                     :len (length flattened)
+                     :data (pad-bytes flattened 31))))))
 
 (defun hci-set-scan-param (hci)
   (hci-send-cmd
@@ -3144,9 +3170,10 @@
   (hci-allow-all-the-events hci)
   (hci-set-random-address hci #xC1234567890A))
 
-(defun start-advertising (hci adv-data)
+(defun start-advertising (hci adv-data &optional scan-data)
   (hci-set-adv-param hci)
   (hci-set-adv-data hci adv-data)
+  (hci-set-scan-data hci scan-data)
   (hci-set-adv-enable t hci))
 
 (defun start-security (hci conn &key is-peripheral)
