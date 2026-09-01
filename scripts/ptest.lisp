@@ -70,22 +70,16 @@
      :read
      (lambda (conn handle)
        (declare (ignore handle))
-       (if (encrypted? conn)
-           (getf cccd-db (get-address conn))
-           :insufficient-authentication))
+       (getf cccd-db (get-address conn)))
 
      :write
      (lambda (conn handle value)
        (declare (ignore handle))
-       (if (encrypted? conn)
-           (progn
-             (setf (getf cccd-db (get-address conn)) value)
-             (funcall subscription-callback
-                      (and (consp value) (logbitp 0 (first value))))
-             nil)
-           (progn
-             (log-err (format nil "CCCD write error: ~A" :insufficient-authentication))
-             :insufficient-authentication)))
+       (progn
+         (setf (getf cccd-db (get-address conn)) value)
+         (funcall subscription-callback
+                  (and (consp value) (logbitp 0 (first value))))
+         nil))
      )))
 
 (defparameter *value-subscribed* nil)
