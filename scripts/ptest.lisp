@@ -38,6 +38,17 @@
    'list))
 (export 'make-value)
 
+;; replay!
+(defparameter *fake-values* '((0 1 2 3 4)
+                              (1 2 3 4 5)
+                              (6 4 3 2 1)))
+
+(defun ptest:make-value (elapsed-time)
+  (declare (ignore elapsed-time))
+  (when *fake-values*
+    (pop *fake-values*)))
+
+
 ;;;;;;;;;;; Bluetooth device start ;;;;;;;;;;;;;
 (in-package :host)
 
