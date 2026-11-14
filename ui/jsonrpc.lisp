@@ -5,8 +5,6 @@
 (require :usocket)
 (require :yason)
 
-(in-package :host)
-
 (setf yason:*list-encoder* 'yason:encode-alist)
 
 (defun make-att-ribute-type (type)

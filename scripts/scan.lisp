@@ -1,6 +1,5 @@
 (require 'asdf)
 (require :host)
-(in-package :host)
 
 (defvar *packetizer-path* "/dev/ttyACM0")
 (defparameter +ftms-uuid+ #x1826)

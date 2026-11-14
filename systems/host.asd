@@ -4,4 +4,5 @@
   :author "Jonathan Rico <jonathan@rico.live>"
   :depends-on ("local-time" "bordeaux-threads" "sb-concurrency" "sb-posix" "cffi-grovel" "cserial-port" "ironclad")
   :pathname "../"
-  :components ((:file "host")))
+  :components ((:file "platform-sbcl")
+               (:file "host")))

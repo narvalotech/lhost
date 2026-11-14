@@ -1,6 +1,5 @@
 (require 'asdf)
 (require :host)
-(in-package :host)
 
 (defun decode-scan-report (evt)
   ;; TODO: handle multiple reports

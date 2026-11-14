@@ -1,6 +1,5 @@
 (require 'asdf)
 (require :host-utils)
-(in-package :host)
 
 (ql:quickload "nodgui")
 ;; (nodgui.demo:demo)

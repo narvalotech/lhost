@@ -7,7 +7,6 @@
     (load quicklisp-init)))
 (asdf:load-asd (merge-pathnames "../systems/host.asd" *load-truename*))
 (asdf:load-system :host)
-(in-package :host)
 
 (defparameter *controller* (make-controller))
 (defvar *packetizer-path* "COM6")
