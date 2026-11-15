@@ -157,3 +157,55 @@
   (with-output-to-string (s)
     (dolist (b bytes)
       (write-char (code-char b) s))))
+
+;;;;;;;;;;;;; btsnoop
+
+(defun write-bytes (bytelist stream)
+  (loop for byte in bytelist do
+    (write-byte byte stream)))
+
+(defun setbit (shift predicate)
+  (ash (if predicate 1 0) shift))
+
+(defun make-flags (packet)
+  (logior
+   ;; 1: c2h  0: h2c
+   (setbit 0 (eql :c2h (getf packet :direction)))
+   ;; 1: data 0: cmd/evt
+   (setbit 1 (not (eql (getf +h4-types+ :acl) (car (getf packet :packet)))))))
+
+(defun make-header (packet)
+  (let* ((original-length (length (getf packet :packet)))
+         (included-length original-length)
+         (flags (make-flags packet))
+         ;; like that's not a lie lol
+         (cumulative-drops 0)
+         ;; don't really care about correct timestamp
+         (timestamp (getf packet :timestamp)))
+    (append
+     (make-c-int :u32 original-length t)
+     (make-c-int :u32 included-length t)
+     (make-c-int :u32 flags t)
+     (make-c-int :u32 cumulative-drops t)
+     (make-c-int :u64 timestamp t))))
+
+(defun write-btsnoop (path hci-log)
+  (with-open-file (stream path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create
+                          :element-type '(unsigned-byte 8))
+    ;; Magic
+    (write-bytes (to-c-string "btsnoop" t) stream)
+    ;; Version
+    (write-bytes (make-c-int :u32 1 t) stream)
+    ;; Datalink type: UART
+    (write-bytes (make-c-int :u32 1002 t) stream)
+
+    ;; Packets
+    (loop for packet in (reverse hci-log) do
+      (write-bytes (make-header packet) stream)
+      (write-bytes (getf packet :packet) stream))))
+
+(defun hci-log-write ()
+  (write-btsnoop "./snoop.log" *hci-log*))
