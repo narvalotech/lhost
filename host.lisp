@@ -2,8 +2,6 @@
 (require 'asdf)
 (require :bordeaux-threads)
 (require :sb-concurrency)
-(require :sb-posix)
-(require :cserial-port)
 (require :ironclad)
 
 ;;;;;;;;;;;;; general utils
@@ -109,83 +107,6 @@
 ;; Eg. write default data length cmd. Len = 200 bytes, time = 1000 us
 (make-c-struct '(("tx-octets" :u16 200) ("tx-time-us" :u16 1000)))
  ; => (200 0 232 3)
-
-(defun char->utf8 (char)
-  "Converts a CL character to a UTF-8 (list of bytes)."
-  ;; Phind made this! 10 bucks well spent
-  ;; https://www.phind.com/search?cache=kohb0esnotediegmqr58rt1m
-  (let ((code (char-code char)))
-    (cond
-      ;; 1-byte sequence
-      ((<= code #x7F)
-       (list code))
-      ;; 2-byte sequence
-      ((<= code #x7FF)
-       (list (logior #xC0 (ash code -6))
-             (logior #x80 (logand code #x3F))))
-      ;; 3-byte sequence
-      ((<= code #xFFFF)
-       (list (logior #xE0 (ash code -12))
-             (logior #x80 (logand (ash code -6) #x3F))
-             (logior #x80 (logand code #x3F))))
-      ;; 4-byte sequence
-      ((<= code #x10FFFF)
-       (list (logior #xF0 (ash code -18))
-             (logior #x80 (logand (ash code -12) #x3F))
-             (logior #x80 (logand (ash code -6) #x3F))
-             (logior #x80 (logand code #x3F)))))))
-
-(char->utf8 #\a)
- ; => (97)
-(char->utf8 #\λ)
- ; => (206 187)
-(char->utf8 #\💻)
- ; => (240 159 146 187)
-
-(defun to-c-string (cl-string &optional null-terminated)
-  "Converts a CL string to a list of bytes"
-  (append
-   (mapcan (lambda (c) (char->utf8 c)) (coerce cl-string 'list))
-   (if null-terminated (list 0) nil)))
-
-(to-c-string "test")
- ; => (116 101 115 116)
-(to-c-string "test" t)
- ; => (116 101 115 116 0)
-(to-c-string "🔵-🦷")
- ; => (240 159 148 181 45 240 159 166 183)
-
-(defun from-c-string (bytes)
-  "Decode an ASCII-encoded string from a list of bytes"
-  ;; This one doesn't support UTF-8
-  (with-output-to-string (s)
-    (dolist (b bytes)
-      (write-char (code-char b) s))))
-
-(defun read-bytes (bytes stream)
-  (let ((b
-          (if (equal bytes 1)
-              (list (when (open-stream-p stream)
-                      (read-byte stream)))
-              (loop for byte from 0 to (- bytes 1)
-                    collect
-                    (when (open-stream-p stream)
-                      (read-byte stream))))))
-    ;; (format nil "read-bytes: ~A" b)
-    b))
-
-(defun make-simplex-raw-fd-stream (file is-output)
-  (sb-sys:make-fd-stream (sb-posix:file-descriptor file)
-                         :element-type 'unsigned-byte
-                         :input (not is-output)
-                         :output is-output
-                         :buffering :none))
-
-(defun open-simplex-fd (path is-output)
-  (let ((file (if is-output
-                  (open path :direction :output :if-exists :overwrite)
-                  (open path :direction :input))))
-    (make-simplex-raw-fd-stream file is-output)))
 
 ;;;;;;;;;;;;; HCI packet-building
 
@@ -948,29 +869,6 @@
 ;; nix-shell -p cargo
 ;; cargo install nrfdfu
 ;; ~/.cargo/bin/nrfdfu samples/bluetooth/hci_uart/build/zephyr/zephyr.elf
-
-(defparameter sizes '(:acl-tx-size 0
-                      :acl-rx-size 1))
-
-(defmacro with-gensyms ((&rest names) &body body)
-  `(let ,(loop for n in names collect `(,n (gensym)))
-     ,@body))
-
-(defmacro with-fifo-packetizer (instance h2c-path c2h-path &body body)
-  (with-gensyms (h2c c2h)
-    `(with-open-stream (,h2c (open-simplex-fd ,h2c-path t))
-       (with-open-stream (,c2h (open-simplex-fd ,c2h-path nil))
-         (let ((,instance (make-hci-packetizer ,h2c ,c2h)))
-           (progn ,@body)
-         )))))
-
-(defmacro with-serial-packetizer (instance serial-port-path &body body)
-  `(cserial-port:with-serial
-       (rs ,serial-port-path :baud-rate 1000000 :data-bits 8 :stop-bits 1 :parity :none)
-     (let* ((serial-stream (cserial-port:make-serial-stream rs))
-            (,instance (make-hci-packetizer serial-stream serial-stream)))
-       (progn ,@body)
-       )))
 
 (defun hci-send-cmd (hci cmd)
   "Send a command and check it's return status. Return status/params if no error."
