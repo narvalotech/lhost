@@ -1,7 +1,6 @@
 ;; deps
 (require 'asdf)
 (require :bordeaux-threads)
-(require :sb-concurrency)
 (require :ironclad)
 
 ;;;;;;;;;;;;; general utils
@@ -684,23 +683,8 @@
                 (delete-if predicate (getf hci :rxq)))
           packet))))
 
-(defun make-signal ()
-  (sb-concurrency:make-gate))
-
-(defun wait-for-signal (var)
-  (sb-concurrency:wait-on-gate var))
-
-(defun send-signal (var)
-  (sb-concurrency:open-gate var))
-
-(defun make-mailbox (name)
-  (sb-concurrency:make-mailbox :name name))
-
-(defun drain-mailbox (mb)
-  (sb-concurrency:receive-message mb :timeout 0.1))
-
 (defun send-to-hci (hci packet)
-  (sb-concurrency:send-message (getf hci :tx-mailbox) packet))
+  (send-to-mailbox (getf hci :tx-mailbox) packet))
 
 (defun send (hci type payload)
   "Format a payload into H4 and send to hci device"
@@ -714,7 +698,7 @@
    (lambda ()
      (loop
        (ignore-errors
-        (sb-concurrency:send-message
+        (send-to-mailbox
          (getf packetizer :rx-mailbox)
          (receive packetizer)))))
    :name "Packetizer RX thread"))
@@ -729,7 +713,7 @@
      (loop
        (ignore-errors
         (let ((packet
-                (sb-concurrency:receive-message
+                (receive-from-mailbox
                  (getf packetizer :tx-mailbox))))
           (when packet
             (log-trace "HWTX: ~X" packet)
@@ -740,11 +724,11 @@
 
 (defun wait-next-hci-rx (hci)
   (add-to-rxq
-   hci (sb-concurrency:receive-message (getf hci :rx-mailbox))))
+   hci (receive-from-mailbox (getf hci :rx-mailbox))))
 
 (defun drain-rxq (hci)
   "Move items into our owned HCI RX queue"
-  (loop until (sb-concurrency:mailbox-empty-p (getf hci :rx-mailbox)) do
+  (loop until (empty-mailbox-p (getf hci :rx-mailbox)) do
     (wait-next-hci-rx hci)))
 
 (declaim (ftype function process-hci))
@@ -3001,8 +2985,8 @@
 
 (defun start-hci (packetizer-path h2c-mailbox c2h-mailbox stop-signal)
   ;; First thing is to empty the mailboxes
-  (loop while (drain-mailbox h2c-mailbox))
-  (loop while (drain-mailbox c2h-mailbox))
+  (loop while (receive-from-mailbox h2c-mailbox))
+  (loop while (receive-from-mailbox c2h-mailbox))
 
   (bt:make-thread
    (lambda ()

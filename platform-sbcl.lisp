@@ -2,6 +2,7 @@
 (require :bordeaux-threads)
 (require :cserial-port)
 (require :local-time)
+(require :sb-concurrency)
 (require :sb-posix)
 
 ;;;;;;;;;;;;; package
@@ -209,3 +210,26 @@
 
 (defun hci-log-write ()
   (write-btsnoop "./snoop.log" *hci-log*))
+
+;;;;;;;;;;;;; Concurrency
+
+(defun make-signal ()
+  (sb-concurrency:make-gate))
+
+(defun wait-for-signal (var)
+  (sb-concurrency:wait-on-gate var))
+
+(defun send-signal (var)
+  (sb-concurrency:open-gate var))
+
+(defun make-mailbox (name)
+  (sb-concurrency:make-mailbox :name name))
+
+(defun receive-from-mailbox (mb &optional (timeout 0.1))
+  (sb-concurrency:receive-message mb :timeout timeout))
+
+(defun send-to-mailbox (mb message)
+  (sb-concurrency:send-message mb message))
+
+(defun empty-mailbox-p (mb)
+  (sb-concurrency:mailbox-empty-p mb))
