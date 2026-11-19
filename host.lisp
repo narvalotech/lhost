@@ -1,7 +1,6 @@
 ;; deps
 (require 'asdf)
 (require :bordeaux-threads)
-(require :ironclad)
 
 ;;;;;;;;;;;;; general utils
 
@@ -2353,65 +2352,6 @@
 
 (defun smp-make-packet (op param)
   (append (smp-make-opcode op) param))
-
-(defparameter *testkey* nil)
-;; (defparameter *testkey* (ironclad:generate-key-pair :SECP256R1))
-
-(defun smp-make-privkey ()
-  (if *testkey*
-      *testkey*
-      (ironclad:generate-key-pair :SECP256R1)))
-
-;; (pxx
-;;  (coerce (getf
-;;           (ironclad:destructure-private-key *testkey*) :x) 'list))
-;;  ; => "0xC4DE2220375311EFEB2AEDDE611D8B2B59D8AFD7F3339BF1F34D682FE03ED5E0"
-
-(defun smp->ironclad (pubkey)
-  (ironclad:make-public-key
-   :SECP256R1
-   :Y
-   (coerce
-    (let* ((x (reverse (subseq pubkey 0 32)))
-           (y (reverse (subseq pubkey 32 64)))
-           (be (append (list #x04) x y)))
-      be)
-    '(vector (unsigned-byte 8)))))
-
-(defun ironclad->smp (ic-privkey)
-  (let* ((serialized (ironclad:destructure-private-key ic-privkey))
-         (pubkey (coerce (getf serialized :Y) 'list))
-         (x (reverse (subseq pubkey 1 33)))
-         (y (reverse (subseq pubkey 33 65)))
-         (le-pubkey (append x y)))
-    le-pubkey))
-
-(defun smp-get-privkey (conn)
-  (ironclad->smp (getf (get-smp-context conn) :our-privkey)))
-
-(defun smp-dhkey (conn)
-  (let* ((priv (getf (get-smp-context conn) :our-privkey))
-         (pub (smp->ironclad (getf (get-smp-context conn) :peer-pubkey))))
-    (log-dbg (format nil "SMP: priv ~X" priv))
-    (log-dbg (format nil "SMP: pub ~X" (getf (get-smp-context conn) :peer-pubkey)))
-    (setf
-     (getf (get-smp-context conn) :dhkey)
-     (reverse
-      (subseq
-       (coerce
-        (ironclad:diffie-hellman priv pub)
-        'list) 1 33)))))
-
-(defun as-array (l)
-  (coerce l '(vector (unsigned-byte 8))))
-
-(defun smp-cmac (key &rest texts)
-  (reverse
-   (coerce
-    (ironclad:with-authenticating-stream (s :cmac (as-array (reverse key)) :aes)
-      (mapcar (lambda (e) (write-bytes (reverse e) s))
-              texts))
-    'list)))
 
 (defparameter +iocap-no-display-no-keyboard+ #x03)
 
