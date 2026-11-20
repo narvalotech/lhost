@@ -61,18 +61,18 @@
 
 ;;;;;;;;;;;;; HCI drivers
 
-(defun make-simplex-raw-fd-stream (file is-output)
-  (sb-sys:make-fd-stream (sb-posix:file-descriptor file)
+(defun make-simplex-raw-fd-stream (fd is-output)
+  (sb-sys:make-fd-stream fd
                          :element-type 'unsigned-byte
                          :input (not is-output)
                          :output is-output
                          :buffering :none))
 
 (defun open-simplex-fd (path is-output)
-  (let ((file (if is-output
-                  (open path :direction :output :if-exists :overwrite)
-                  (open path :direction :input))))
-    (make-simplex-raw-fd-stream file is-output)))
+  (let ((fd (if is-output
+                (sb-posix:open path sb-posix:o-wronly)
+                (sb-posix:open path sb-posix:o-rdonly))))
+    (make-simplex-raw-fd-stream fd is-output)))
 
 (defmacro with-gensyms ((&rest names) &body body)
   `(let ,(loop for n in names collect `(,n (gensym)))
@@ -220,8 +220,11 @@
 (defun wait-for-signal (var)
   (sb-concurrency:wait-on-gate var))
 
-(defun send-signal (var)
+(defun set-signal (var)
   (sb-concurrency:open-gate var))
+
+(defun clear-signal (var)
+  (sb-concurrency:close-gate var))
 
 (defun make-mailbox (name)
   (sb-concurrency:make-mailbox :name name))

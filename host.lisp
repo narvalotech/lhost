@@ -2927,6 +2927,8 @@
   ;; First thing is to empty the mailboxes
   (loop while (receive-from-mailbox h2c-mailbox))
   (loop while (receive-from-mailbox c2h-mailbox))
+  ;; And reset the signal / cancel-token
+  (clear-signal stop-signal)
 
   (bt:make-thread
    (lambda ()
@@ -2947,7 +2949,7 @@
 
 (defun stop-hci (stop-signal)
   ;; Kill all threads started by start-hci
-  (send-signal stop-signal))
+  (set-signal stop-signal))
 
 (defun get-hci-path ()
   (or
