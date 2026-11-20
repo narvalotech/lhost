@@ -785,7 +785,8 @@
    :tx-mailbox (make-mailbox "HCI H => C")
    :stop-signal (make-signal)
    :rxq '()
-   :random-address 0))
+   :random-address 0
+   :master-thread nil))
 
 ;;;;;;;;;;;;; script
 
@@ -2920,32 +2921,43 @@
         (mapc
          (lambda (th) (ignore-errors
                        (bt:destroy-thread th)))
-         threads)))
-    ))
+         threads)))))
 
-(defun start-hci (packetizer-path h2c-mailbox c2h-mailbox stop-signal)
-  ;; First thing is to empty the mailboxes
-  (loop while (receive-from-mailbox h2c-mailbox))
-  (loop while (receive-from-mailbox c2h-mailbox))
-  ;; And reset the signal / cancel-token
-  (clear-signal stop-signal)
+(defun start-hci (packetizer-path controller)
+  (let ((h2c-mailbox (getf controller :tx-mailbox))
+        (c2h-mailbox (getf controller :rx-mailbox))
+        (stop-signal (getf controller :stop-signal)))
 
-  (bt:make-thread
-   (lambda ()
-     (if (listp packetizer-path)
-         (with-fifo-packetizer
-             packetizer
-             (getf packetizer-path :h2c)
-             (getf packetizer-path :c2h)
-           (setf (getf packetizer :rx-mailbox) c2h-mailbox)
-           (setf (getf packetizer :tx-mailbox) h2c-mailbox)
-           (packetizer-master-thread packetizer stop-signal))
+    ;; First thing is to terminate the transport if it's live
+    (when (getf controller :master-thread)
+      (stop-hci stop-signal)
+      (bt:join-thread (getf controller :master-thread))
+      (setf (getf controller :master-thread) nil))
 
-         (with-serial-packetizer packetizer packetizer-path
-           (setf (getf packetizer :rx-mailbox) c2h-mailbox)
-           (setf (getf packetizer :tx-mailbox) h2c-mailbox)
-           (packetizer-master-thread packetizer stop-signal))))
-   :name "Packetizer (HCI server) master thread"))
+    ;; Then drain the mailboxes
+    (loop while (receive-from-mailbox h2c-mailbox))
+    (loop while (receive-from-mailbox c2h-mailbox))
+
+    ;; And finally reset the signal / cancel-token
+    (clear-signal stop-signal)
+
+    (setf (getf controller :master-thread)
+          (bt:make-thread
+           (lambda ()
+             (if (listp packetizer-path)
+                 (with-fifo-packetizer
+                     packetizer
+                     (getf packetizer-path :h2c)
+                     (getf packetizer-path :c2h)
+                   (setf (getf packetizer :rx-mailbox) c2h-mailbox)
+                   (setf (getf packetizer :tx-mailbox) h2c-mailbox)
+                   (packetizer-master-thread packetizer stop-signal))
+
+                 (with-serial-packetizer packetizer packetizer-path
+                   (setf (getf packetizer :rx-mailbox) c2h-mailbox)
+                   (setf (getf packetizer :tx-mailbox) h2c-mailbox)
+                   (packetizer-master-thread packetizer stop-signal))))
+           :name "Packetizer (HCI server) master thread"))))
 
 (defun stop-hci (stop-signal)
   ;; Kill all threads started by start-hci

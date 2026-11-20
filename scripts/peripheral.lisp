@@ -1,11 +1,7 @@
 (defparameter *controller* (make-controller))
 (defvar *packetizer-path* "/dev/ttyACM0")
 
-(start-hci
- *packetizer-path*
- (getf *controller* :tx-mailbox)
- (getf *controller* :rx-mailbox)
- (getf *controller* :stop-signal))
+(start-hci *packetizer-path* *controller*)
 
 (time
  (let ((hci *controller*))

@@ -142,11 +142,7 @@
   (sb-ext:exit :code 130))
 
 (handler-bind ((sb-sys:interactive-interrupt #'handle-ctrl-c))
-  (start-hci
-   *packetizer-path*
-   (getf *controller* :tx-mailbox)
-   (getf *controller* :rx-mailbox)
-   (getf *controller* :stop-signal))
+  (start-hci *packetizer-path* *controller*)
   (time
    (let ((hci *controller*))
      (hci-log-reset)

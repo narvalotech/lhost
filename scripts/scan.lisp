@@ -5,11 +5,7 @@
 (defparameter +ftms-uuid+ #x1826)
 
 (defparameter *controller* (make-controller))
-(start-hci
- *packetizer-path*
- (getf *controller* :tx-mailbox)
- (getf *controller* :rx-mailbox)
- (getf *controller* :stop-signal))
+(start-hci *packetizer-path* *controller*)
 
 (time
  (let ((hci *controller*))

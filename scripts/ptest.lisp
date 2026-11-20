@@ -142,11 +142,7 @@
 (handler-bind ((sb-sys:interactive-interrupt #'handle-ctrl-c))
   (setf *current-log-level* :dbg)
 
-  (start-hci
-   *packetizer-path*
-   (getf *controller* :tx-mailbox)
-   (getf *controller* :rx-mailbox)
-   (getf *controller* :stop-signal))
+  (start-hci *packetizer-path* *controller*)
 
   (let ((hci *controller*))
     (hci-log-reset)

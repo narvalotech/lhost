@@ -131,11 +131,7 @@
   (log-inf "Starting backend on ~A" packetizer-path)
 
   (list
-   (start-hci
-    packetizer-path
-    (getf *controller* :tx-mailbox)
-    (getf *controller* :rx-mailbox)
-    (getf *controller* :stop-signal))
+   (start-hci packetizer-path *controller*)
 
    (bt:make-thread
     (lambda ()
