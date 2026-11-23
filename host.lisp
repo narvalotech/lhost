@@ -774,10 +774,7 @@
    :c2h c2h-stream
    :rx-mailbox '()
    :tx-mailbox '()
-   :acl-in '()
-   :acl-tx-size 0
-   :acl-tx-num 0
-   :acl-rx-size 0))
+   :acl-in '()))
 
 (defun make-controller ()
   (list
@@ -786,6 +783,9 @@
    :stop-signal (make-signal)
    :rxq '()
    :random-address 0
+   :acl-tx-size 0
+   :acl-tx-num 0
+   :acl-rx-size 0
    :master-thread nil))
 
 ;;;;;;;;;;;;; script
